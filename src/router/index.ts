@@ -3,10 +3,12 @@ import { useAuthSession } from '@/auth/auth-session';
 import AdminLayout from '@/views/AdminLayout.vue';
 import ChatWorkbenchView from '@/views/ChatWorkbenchView.vue';
 import LoginView from '@/views/LoginView.vue';
+import DeptListView from '@/views/system/DeptListView.vue';
 import MenuListView from '@/views/system/MenuListView.vue';
 import NoPermissionView from '@/views/NoPermissionView.vue';
 import NotFoundView from '@/views/NotFoundView.vue';
 import PlaceholderView from '@/views/PlaceholderView.vue';
+import PermissionListView from '@/views/system/PermissionListView.vue';
 import RoleListView from '@/views/system/RoleListView.vue';
 import TaskCenterWorkbenchView from '@/views/TaskCenterWorkbenchView.vue';
 import { findFirstAuthorizedMenuPath, isAuthorizedMenuRoute } from './menu-permissions';
@@ -36,7 +38,7 @@ const placeholderRoutes: RouteRecordRaw[] = [
   {
     path: 'system/depts',
     name: 'SystemDept',
-    component: PlaceholderView,
+    component: DeptListView,
     meta: { title: '部门管理', menuCode: 'system.dept' },
   },
   {
@@ -44,6 +46,12 @@ const placeholderRoutes: RouteRecordRaw[] = [
     name: 'SystemMenu',
     component: MenuListView,
     meta: { title: '菜单管理', menuCode: 'system.menu' },
+  },
+  {
+    path: 'system/permissions',
+    name: 'SystemPermission',
+    component: PermissionListView,
+    meta: { title: '权限管理', menuCode: 'system.permission' },
   },
   {
     path: 'system/dicts',

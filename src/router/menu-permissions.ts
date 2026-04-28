@@ -20,6 +20,7 @@ export function flattenMenuTree(menus: readonly AuthorizedMenuNode[]): Authorize
 
 export function findFirstAuthorizedMenuPath(menus: readonly AuthorizedMenuNode[]): string | null {
   const flatMenus = flattenMenuTree(menus);
+  // 默认落点优先选择真实页面菜单，目录只有在带路由时才作为兜底。
   const firstMenu = flatMenus.find((menu) => menu.menuType === 'menu' && normalizeRoutePath(menu.routePath));
   const firstRoute = firstMenu ?? flatMenus.find((menu) => normalizeRoutePath(menu.routePath));
   return firstRoute ? normalizeRoutePath(firstRoute.routePath) : null;

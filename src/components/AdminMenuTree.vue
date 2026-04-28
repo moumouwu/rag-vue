@@ -34,6 +34,7 @@ function hasVisibleChildren(menu: AuthorizedMenuNode): boolean {
 }
 
 function isVisibleMenu(menu: AuthorizedMenuNode): boolean {
+  // 目录本身不可点击时，只要存在可见子菜单也要保留父级入口。
   return isNavigableMenu(menu) || hasVisibleChildren(menu);
 }
 
@@ -43,10 +44,12 @@ function isActiveMenu(menu: AuthorizedMenuNode): boolean {
 }
 
 function isExpanded(menu: AuthorizedMenuNode): boolean {
+  // alwaysShowFlag 由菜单管理维护，用于固定展开关键目录。
   return menu.alwaysShowFlag || expandedMenuKeys.value.has(menuKey(menu));
 }
 
 function toggleMenu(menu: AuthorizedMenuNode): void {
+  // 固定展开或没有可见子级时不响应展开切换，避免无效点击改变状态。
   if (menu.alwaysShowFlag || !hasVisibleChildren(menu)) {
     return;
   }

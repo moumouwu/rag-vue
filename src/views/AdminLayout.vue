@@ -27,6 +27,7 @@ function resolveTabTitle(currentRoute: RouteLocationNormalizedLoaded): string {
 }
 
 function shouldTrackTab(currentRoute: RouteLocationNormalizedLoaded): boolean {
+  // 只把真实菜单授权的页面放入页签，避免错误页或无权限页占用导航。
   if (currentRoute.name === 'NoPermission' || currentRoute.name === 'NotFound') {
     return false;
   }
@@ -34,6 +35,7 @@ function shouldTrackTab(currentRoute: RouteLocationNormalizedLoaded): boolean {
 }
 
 function shouldCacheRoute(currentRoute: RouteLocationNormalizedLoaded): boolean {
+  // 页面是否缓存跟随菜单配置，避免在路由表中散落缓存规则。
   const menu = findAuthorizedMenuByPath(currentRoute.path, rootMenus.value);
   return Boolean(menu?.cacheFlag);
 }
@@ -64,6 +66,7 @@ async function closeVisitedTab(path: string): Promise<void> {
   }
 
   const fallbackTab = nextTabs[closingIndex - 1] ?? nextTabs[closingIndex] ?? null;
+  // 关闭当前页签后优先回到相邻页签，没有页签时回到当前账号第一个可访问菜单。
   await router.push(fallbackTab?.path ?? resolveDefaultPath());
 }
 

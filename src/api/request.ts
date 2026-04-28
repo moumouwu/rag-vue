@@ -149,6 +149,7 @@ function joinUrl(baseUrl: string, url: string): string {
   return `${normalizedBaseUrl}${normalizedPath}`;
 }
 
+// 所有业务请求都走这里，统一附加 Token、解析包裹响应并归一化错误。
 export async function request<TData, TBody = unknown>(options: ApiRequestOptions<TBody>): Promise<TData> {
   const fetcher = clientConfig.fetcher;
   if (!fetcher) {
@@ -184,6 +185,7 @@ export async function request<TData, TBody = unknown>(options: ApiRequestOptions
 }
 
 export const apiRequest = {
+  // 查询类请求统一走 GET，不携带 body，避免不同页面自行拼 fetch 逻辑。
   get<TData>(url: string, options?: Omit<ApiRequestOptions<never>, 'method' | 'url' | 'body'>): Promise<TData> {
     return request<TData>({
       ...(options ?? {}),
@@ -191,6 +193,7 @@ export const apiRequest = {
       url,
     });
   },
+  // 创建、查询分页和动作类请求统一走 POST，由业务模块决定请求体结构。
   post<TData, TBody = unknown>(
     url: string,
     body?: TBody,
@@ -203,6 +206,7 @@ export const apiRequest = {
       body,
     });
   },
+  // 更新类请求统一走 PUT，保持与后端治理接口合同一致。
   put<TData, TBody = unknown>(
     url: string,
     body?: TBody,
@@ -215,6 +219,7 @@ export const apiRequest = {
       body,
     });
   },
+  // 删除请求只表达删除意图，是否逻辑删除由后端统一控制。
   delete<TData>(url: string, options?: Omit<ApiRequestOptions<never>, 'method' | 'url' | 'body'>): Promise<TData> {
     return request<TData>({
       ...(options ?? {}),

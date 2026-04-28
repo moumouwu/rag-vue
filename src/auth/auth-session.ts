@@ -26,6 +26,7 @@ async function initializeSession(): Promise<void> {
     return;
   }
 
+  // 初始化只信任本地令牌作为入口，用户信息和菜单仍以后端实时返回为准。
   const accessToken = readAccessToken();
   state.accessToken = accessToken;
   if (!accessToken) {
@@ -53,6 +54,7 @@ async function login(command: LoginCommand): Promise<LoginResult> {
     writeAccessToken(result.accessToken);
     state.accessToken = result.accessToken;
     state.currentUser = result.userInfo;
+    // 登录后立即加载菜单，路由守卫和左侧导航都依赖这份动态授权数据。
     state.menus = await systemApi.getCurrentUserMenus();
     state.initialized = true;
     return result;

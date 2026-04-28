@@ -42,6 +42,7 @@ const parentOptions = computed(() => {
   const options: Array<{ menuId: EntityId; label: string }> = [{ menuId: '0', label: '根目录' }];
   flattenMenus(menuTree.value).forEach((menu) => {
     if (menu.menuId !== editingMenuId.value) {
+      // 全角空格只用于下拉层级展示，不参与提交值，避免污染菜单名称。
       options.push({ menuId: menu.menuId, label: `${'　'.repeat(resolveLevel(menu))}${menu.menuName}` });
     }
   });
@@ -124,6 +125,7 @@ async function submitMenu(): Promise<void> {
       await systemApi.createMenu({ ...menuForm });
       showSuccessMessage('菜单已新增');
     } else if (editingMenuId.value) {
+      // 菜单编码创建后不可修改，编辑请求只提交可维护字段。
       const payload: SystemMenuUpdatePayload = {
         parentId: menuForm.parentId,
         menuType: menuForm.menuType,
@@ -178,7 +180,7 @@ onMounted(loadMenuTree);
     <div class="system-page__header">
       <div>
         <h2 class="section-heading__title">菜单管理</h2>
-        <p class="section-heading__desc">维护目录、菜单和按钮权限点，菜单授权会影响角色可访问入口。</p>
+        <p class="section-heading__desc">维护目录、菜单和按钮入口，菜单授权只影响角色可访问导航。</p>
       </div>
       <el-button type="primary" @click="openCreateMenu()">新增根菜单</el-button>
     </div>

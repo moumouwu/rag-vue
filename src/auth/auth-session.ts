@@ -64,6 +64,14 @@ async function login(command: LoginCommand): Promise<LoginResult> {
   }
 }
 
+async function refreshCurrentUserMenus(): Promise<void> {
+  if (!state.accessToken || !state.currentUser) {
+    return;
+  }
+  // 角色授权变更后刷新当前菜单，避免页面继续显示旧授权结果。
+  state.menus = await systemApi.getCurrentUserMenus();
+}
+
 async function logout(): Promise<void> {
   try {
     if (state.accessToken) {
@@ -86,6 +94,7 @@ export function useAuthSession() {
   return {
     state: readonly(state),
     initializeSession,
+    refreshCurrentUserMenus,
     login,
     logout,
     resetSession,

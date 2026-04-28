@@ -33,6 +33,11 @@ function shouldTrackTab(currentRoute: RouteLocationNormalizedLoaded): boolean {
   return Boolean(findAuthorizedMenuByPath(currentRoute.path, rootMenus.value));
 }
 
+function shouldCacheRoute(currentRoute: RouteLocationNormalizedLoaded): boolean {
+  const menu = findAuthorizedMenuByPath(currentRoute.path, rootMenus.value);
+  return Boolean(menu?.cacheFlag);
+}
+
 function addVisitedTab(currentRoute: RouteLocationNormalizedLoaded): void {
   if (!shouldTrackTab(currentRoute)) {
     return;
@@ -142,7 +147,16 @@ watch(
       </div>
 
       <main class="admin-content">
-        <RouterView />
+        <RouterView v-slot="{ Component, route: viewRoute }">
+          <KeepAlive>
+            <component
+              :is="Component"
+              v-if="shouldCacheRoute(viewRoute)"
+              :key="String(viewRoute.name ?? viewRoute.path)"
+            />
+          </KeepAlive>
+          <component :is="Component" v-if="!shouldCacheRoute(viewRoute)" :key="viewRoute.fullPath" />
+        </RouterView>
       </main>
     </div>
   </div>

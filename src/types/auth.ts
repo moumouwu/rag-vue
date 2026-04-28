@@ -1,8 +1,10 @@
+import type { EntityId } from './system';
+
 export interface CurrentUserInfo {
-  userId: number;
+  userId: EntityId;
   username: string;
   displayName: string;
-  departmentId: number | null;
+  departmentId: EntityId | null;
   roleCodes: string[];
   superAdmin: boolean;
 }

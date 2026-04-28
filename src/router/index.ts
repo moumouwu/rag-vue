@@ -3,9 +3,11 @@ import { useAuthSession } from '@/auth/auth-session';
 import AdminLayout from '@/views/AdminLayout.vue';
 import ChatWorkbenchView from '@/views/ChatWorkbenchView.vue';
 import LoginView from '@/views/LoginView.vue';
+import MenuListView from '@/views/system/MenuListView.vue';
 import NoPermissionView from '@/views/NoPermissionView.vue';
 import NotFoundView from '@/views/NotFoundView.vue';
 import PlaceholderView from '@/views/PlaceholderView.vue';
+import RoleListView from '@/views/system/RoleListView.vue';
 import TaskCenterWorkbenchView from '@/views/TaskCenterWorkbenchView.vue';
 import { findFirstAuthorizedMenuPath, isAuthorizedMenuRoute } from './menu-permissions';
 
@@ -28,7 +30,7 @@ const placeholderRoutes: RouteRecordRaw[] = [
   {
     path: 'system/roles',
     name: 'SystemRole',
-    component: PlaceholderView,
+    component: RoleListView,
     meta: { title: '角色管理', menuCode: 'system.role' },
   },
   {
@@ -40,7 +42,7 @@ const placeholderRoutes: RouteRecordRaw[] = [
   {
     path: 'system/menus',
     name: 'SystemMenu',
-    component: PlaceholderView,
+    component: MenuListView,
     meta: { title: '菜单管理', menuCode: 'system.menu' },
   },
   {

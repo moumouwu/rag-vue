@@ -43,10 +43,13 @@ function isActiveMenu(menu: AuthorizedMenuNode): boolean {
 }
 
 function isExpanded(menu: AuthorizedMenuNode): boolean {
-  return expandedMenuKeys.value.has(menuKey(menu));
+  return menu.alwaysShowFlag || expandedMenuKeys.value.has(menuKey(menu));
 }
 
 function toggleMenu(menu: AuthorizedMenuNode): void {
+  if (menu.alwaysShowFlag || !hasVisibleChildren(menu)) {
+    return;
+  }
   const nextKeys = new Set(expandedMenuKeys.value);
   const key = menuKey(menu);
   if (nextKeys.has(key)) {
@@ -68,6 +71,7 @@ const visibleMenus = computed(() => props.menus.filter(isVisibleMenu));
         :class="{
           'admin-menu-tree__row--active': isActiveMenu(menu),
           'admin-menu-tree__row--parent': hasVisibleChildren(menu),
+          'admin-menu-tree__row--pinned': menu.alwaysShowFlag,
         }"
       >
         <button
@@ -75,7 +79,8 @@ const visibleMenus = computed(() => props.menus.filter(isVisibleMenu));
           class="admin-menu-tree__toggle"
           type="button"
           :aria-expanded="isExpanded(menu)"
-          :aria-label="`${isExpanded(menu) ? '收起' : '展开'}${menu.menuName}`"
+          :aria-label="menu.alwaysShowFlag ? `${menu.menuName}已固定展开` : `${isExpanded(menu) ? '收起' : '展开'}${menu.menuName}`"
+          :disabled="menu.alwaysShowFlag"
           @click="toggleMenu(menu)"
         >
           <span class="admin-menu-tree__chevron" :class="{ 'admin-menu-tree__chevron--open': isExpanded(menu) }">

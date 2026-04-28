@@ -92,7 +92,7 @@ function isApiSuccessResponse<TData>(payload: unknown): payload is ApiSuccessRes
   }
 
   const candidate = payload as Partial<ApiSuccessResponse<TData>>;
-  return candidate.success === true && 'data' in candidate;
+  return candidate.success === true;
 }
 
 // 统一兜底成后端约定的错误结构，避免页面层重复处理网络异常和非标响应。
@@ -201,6 +201,25 @@ export const apiRequest = {
       method: 'POST',
       url,
       body,
+    });
+  },
+  put<TData, TBody = unknown>(
+    url: string,
+    body?: TBody,
+    options?: Omit<ApiRequestOptions<TBody>, 'method' | 'url' | 'body'>,
+  ): Promise<TData> {
+    return request<TData, TBody>({
+      ...(options ?? {}),
+      method: 'PUT',
+      url,
+      body,
+    });
+  },
+  delete<TData>(url: string, options?: Omit<ApiRequestOptions<never>, 'method' | 'url' | 'body'>): Promise<TData> {
+    return request<TData>({
+      ...(options ?? {}),
+      method: 'DELETE',
+      url,
     });
   },
 };

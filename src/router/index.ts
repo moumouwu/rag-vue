@@ -3,6 +3,7 @@ import { useAuthSession } from '@/auth/auth-session';
 import AdminLayout from '@/views/AdminLayout.vue';
 import ChatWorkbenchView from '@/views/ChatWorkbenchView.vue';
 import LoginView from '@/views/LoginView.vue';
+import DictListView from '@/views/system/DictListView.vue';
 import DeptListView from '@/views/system/DeptListView.vue';
 import MenuListView from '@/views/system/MenuListView.vue';
 import NoPermissionView from '@/views/NoPermissionView.vue';
@@ -10,6 +11,7 @@ import NotFoundView from '@/views/NotFoundView.vue';
 import PlaceholderView from '@/views/PlaceholderView.vue';
 import PermissionListView from '@/views/system/PermissionListView.vue';
 import RoleListView from '@/views/system/RoleListView.vue';
+import UserListView from '@/views/system/UserListView.vue';
 import TaskCenterWorkbenchView from '@/views/TaskCenterWorkbenchView.vue';
 import { findFirstAuthorizedMenuPath, isAuthorizedMenuRoute } from './menu-permissions';
 
@@ -26,7 +28,7 @@ const placeholderRoutes: RouteRecordRaw[] = [
   {
     path: 'system/users',
     name: 'SystemUser',
-    component: PlaceholderView,
+    component: UserListView,
     meta: { title: '用户管理', menuCode: 'system.user' },
   },
   {
@@ -56,7 +58,7 @@ const placeholderRoutes: RouteRecordRaw[] = [
   {
     path: 'system/dicts',
     name: 'SystemDict',
-    component: PlaceholderView,
+    component: DictListView,
     meta: { title: '数据字典', menuCode: 'system.dict' },
   },
   { path: 'ai', name: 'Ai', component: PlaceholderView, meta: { title: 'AI配置', menuCode: 'ai' } },

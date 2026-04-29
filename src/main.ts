@@ -1,5 +1,6 @@
 import { createApp } from 'vue';
 import ElementPlus from 'element-plus';
+import zhCn from 'element-plus/es/locale/lang/zh-cn';
 import App from './App.vue';
 import { configureApiClient } from '@/api';
 import { readAccessToken } from '@/auth/auth-storage';
@@ -13,4 +14,5 @@ configureApiClient({
   getAccessToken: () => readAccessToken(),
 });
 
-createApp(App).use(router).use(ElementPlus).mount('#app');
+// 统一使用中文组件文案，避免分页、弹窗等基础控件暴露英文默认值。
+createApp(App).use(router).use(ElementPlus, { locale: zhCn }).mount('#app');

@@ -7,6 +7,7 @@ import type {
   SystemMenuManagementNode,
   SystemPermission,
   SystemPermissionCreatePayload,
+  SystemPermissionQuery,
   SystemPermissionUpdatePayload,
 } from '@/types';
 import { confirmAction, showErrorMessage, showSuccessMessage } from '@/utils/ui-feedback';
@@ -43,6 +44,11 @@ const formMode = ref<PermissionFormMode>('create');
 const editingPermissionId = ref<EntityId | null>(null);
 const selectedModuleKey = ref('');
 const keyword = ref('');
+const permissionTypeFilter = ref<SystemPermissionQuery['permissionType']>('');
+const permissionStatusFilter = ref<SystemPermissionQuery['permissionStatus']>('');
+const permissionPageNo = ref(1);
+const permissionPageSize = ref(10);
+const permissionTotal = ref(0);
 
 const permissionForm = reactive<SystemPermissionCreatePayload>({
   permissionCode: '',
@@ -81,20 +87,7 @@ const moduleOptions = computed(() => {
 });
 const formModuleOptions = computed(() => moduleOptions.value.filter((module) => module.key !== EMPTY_MODULE_KEY));
 
-const filteredPermissions = computed(() => {
-  const normalizedKeyword = keyword.value.trim().toLowerCase();
-  return permissions.value.filter((permission) => {
-    const moduleMatched = !selectedModuleKey.value || moduleKey(permission.moduleCode) === selectedModuleKey.value;
-    const keywordMatched =
-      !normalizedKeyword ||
-      safeText(permission.permissionName).toLowerCase().includes(normalizedKeyword) ||
-      safeText(permission.permissionCode).toLowerCase().includes(normalizedKeyword) ||
-      safeText(permission.resourcePath).toLowerCase().includes(normalizedKeyword);
-    return moduleMatched && keywordMatched;
-  });
-});
-
-const enabledCount = computed(
+const currentPageEnabledCount = computed(
   () => permissions.value.filter((permission) => permission.permissionStatus === 'enabled').length,
 );
 const dialogTitle = computed(() => (formMode.value === 'create' ? '新增权限' : '编辑权限'));
@@ -171,7 +164,24 @@ function menuCodeToModuleCode(menuCode: string): string {
 async function loadPageData(): Promise<void> {
   loading.value = true;
   try {
-    permissions.value = await systemApi.listPermissions();
+    const pageData = await systemApi.pagePermissions({
+      pageNo: permissionPageNo.value,
+      pageSize: permissionPageSize.value,
+      keyword: keyword.value.trim(),
+      moduleCode: selectedModuleKey.value === EMPTY_MODULE_KEY ? '' : selectedModuleKey.value,
+      permissionType: permissionTypeFilter.value,
+      permissionStatus: permissionStatusFilter.value,
+    });
+    if (pageData.list.length === 0 && pageData.total > 0 && permissionPageNo.value > 1) {
+      // 删除或筛选导致当前页为空时回到最后一页，避免表格停留在无效页码。
+      permissionPageNo.value = Math.max(1, Math.ceil(pageData.total / permissionPageSize.value));
+      await loadPageData();
+      return;
+    }
+    permissionPageNo.value = pageData.pageNo;
+    permissionPageSize.value = pageData.pageSize;
+    permissionTotal.value = pageData.total;
+    permissions.value = pageData.list;
     try {
       menuTree.value = await systemApi.listMenuTree();
     } catch (error) {
@@ -187,6 +197,22 @@ async function loadPageData(): Promise<void> {
   } finally {
     loading.value = false;
   }
+}
+
+async function searchPermissions(): Promise<void> {
+  permissionPageNo.value = 1;
+  await loadPageData();
+}
+
+async function handlePermissionPageChange(pageNo: number): Promise<void> {
+  permissionPageNo.value = pageNo;
+  await loadPageData();
+}
+
+async function handlePermissionSizeChange(pageSize: number): Promise<void> {
+  permissionPageSize.value = pageSize;
+  permissionPageNo.value = 1;
+  await loadPageData();
 }
 
 function resetPermissionForm(): void {
@@ -270,6 +296,11 @@ async function submitPermission(): Promise<void> {
   try {
     if (formMode.value === 'create') {
       await systemApi.createPermission(payload);
+      keyword.value = '';
+      selectedModuleKey.value = '';
+      permissionTypeFilter.value = '';
+      permissionStatusFilter.value = '';
+      permissionPageNo.value = 1;
       showSuccessMessage('权限已新增');
     } else if (editingPermissionId.value) {
       const updatePayload: SystemPermissionUpdatePayload = {
@@ -306,6 +337,9 @@ async function deletePermission(permission: SystemPermission): Promise<void> {
   try {
     await systemApi.deletePermission(permission.permissionId);
     showSuccessMessage('权限已删除');
+    if (permissions.value.length === 1 && permissionPageNo.value > 1) {
+      permissionPageNo.value -= 1;
+    }
     await loadPageData();
   } catch (error) {
     showErrorMessage(resolveErrorMessage(error, '权限删除失败'));
@@ -329,7 +363,13 @@ onMounted(loadPageData);
     </div>
 
     <div class="permission-toolbar">
-      <el-select v-model="selectedModuleKey" clearable placeholder="全部模块" class="permission-toolbar__module">
+      <el-select
+        v-model="selectedModuleKey"
+        clearable
+        placeholder="全部模块"
+        class="permission-toolbar__module"
+        @change="searchPermissions"
+      >
         <el-option
           v-for="module in moduleOptions"
           :key="module.key"
@@ -343,14 +383,30 @@ onMounted(loadPageData);
           </span>
         </el-option>
       </el-select>
-      <el-input v-model="keyword" clearable placeholder="搜索权限名称、编码或路径" class="permission-toolbar__search" />
+      <el-select v-model="permissionTypeFilter" clearable placeholder="全部类型" @change="searchPermissions">
+        <el-option label="接口" value="api" />
+        <el-option label="操作" value="operation" />
+        <el-option label="数据范围" value="data_scope" />
+      </el-select>
+      <el-select v-model="permissionStatusFilter" clearable placeholder="全部状态" @change="searchPermissions">
+        <el-option label="启用" value="enabled" />
+        <el-option label="停用" value="disabled" />
+      </el-select>
+      <el-input
+        v-model="keyword"
+        clearable
+        placeholder="搜索权限名称、编码或路径"
+        class="permission-toolbar__search"
+        @keyup.enter="searchPermissions"
+      />
+      <el-button @click="searchPermissions">查询</el-button>
       <div class="permission-toolbar__count">
-        <span>共 {{ permissions.length }} 项</span>
-        <span>启用 {{ enabledCount }} 项</span>
+        <span>共 {{ permissionTotal }} 项</span>
+        <span>当前页启用 {{ currentPageEnabledCount }} 项</span>
       </div>
     </div>
 
-    <el-table v-loading="loading" :data="filteredPermissions" border row-key="permissionId" class="system-page__table">
+    <el-table v-loading="loading" :data="permissions" border row-key="permissionId" class="system-page__table">
       <el-table-column prop="permissionName" label="权限名称" min-width="170" />
       <el-table-column prop="permissionCode" label="权限编码" min-width="210" show-overflow-tooltip />
       <el-table-column label="所属模块" min-width="120">
@@ -382,6 +438,18 @@ onMounted(loadPageData);
         </template>
       </el-table-column>
     </el-table>
+    <div class="permission-pagination">
+      <el-pagination
+        v-model:current-page="permissionPageNo"
+        v-model:page-size="permissionPageSize"
+        background
+        :page-sizes="[10, 20, 50, 100]"
+        :total="permissionTotal"
+        layout="total, sizes, prev, pager, next"
+        @current-change="handlePermissionPageChange"
+        @size-change="handlePermissionSizeChange"
+      />
+    </div>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="840px" class="permission-edit-dialog">
       <el-form :model="permissionForm" label-position="top" class="permission-form">
@@ -497,7 +565,7 @@ onMounted(loadPageData);
 
 .permission-toolbar {
   display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(220px, 1fr) auto;
+  grid-template-columns: minmax(160px, 220px) minmax(120px, 150px) minmax(120px, 150px) minmax(220px, 1fr) auto auto;
   gap: 12px;
   align-items: center;
   margin-bottom: 16px;
@@ -514,6 +582,12 @@ onMounted(loadPageData);
   color: var(--el-text-color-secondary);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.permission-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .module-option {

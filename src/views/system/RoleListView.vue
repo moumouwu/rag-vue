@@ -5,6 +5,7 @@ import { useAuthSession } from '@/auth/auth-session';
 import { systemApi } from '@/api/modules/system';
 import type {
   EntityId,
+  SystemDept,
   SystemPermission,
   SystemMenuManagementNode,
   SystemRole,
@@ -28,25 +29,32 @@ interface PermissionTreeNode {
 }
 
 const DATA_SCOPE_DESCRIPTIONS = [
-  { scope: '全部数据', description: '当前仅保存配置，尚未接入业务查询过滤。' },
-  { scope: '本部门', description: '当前仅保存配置，尚未按当前用户部门限制数据。' },
-  { scope: '本部门及下级', description: '当前仅保存配置，尚未展开组织树做数据过滤。' },
-  { scope: '自定义部门', description: '当前仅保存配置，暂未提供部门范围维护入口。' },
+  { value: 'all', scope: '全部数据', description: '已定义为全部数据规则，业务查询接入数据范围后不追加部门过滤。' },
+  { value: 'self_dept', scope: '本部门', description: '已定义为当前用户所属部门规则，业务查询接入后按本人部门过滤。' },
+  {
+    value: 'self_and_children',
+    scope: '本部门及下级',
+    description: '已定义为当前用户部门及下级规则，后端会按部门树解析可访问部门。',
+  },
+  { value: 'custom_dept', scope: '自定义部门', description: '已支持维护部门范围，业务查询接入后按勾选部门过滤。' },
 ];
 
 const roles = ref<SystemRole[]>([]);
 const menuTree = ref<SystemMenuManagementNode[]>([]);
+const deptTree = ref<SystemDept[]>([]);
 const permissions = ref<SystemPermission[]>([]);
 const loading = ref(false);
 const saving = ref(false);
 const roleDialogVisible = ref(false);
 const menuDialogVisible = ref(false);
 const permissionDialogVisible = ref(false);
+const dataScopeDialogVisible = ref(false);
 const roleFormMode = ref<RoleFormMode>('create');
 const editingRoleId = ref<EntityId | null>(null);
 const assigningRole = ref<SystemRole | null>(null);
 const menuAuthTreeRef = ref<InstanceType<typeof ElTree> | null>(null);
 const permissionAuthTreeRef = ref<InstanceType<typeof ElTree> | null>(null);
+const deptScopeTreeRef = ref<InstanceType<typeof ElTree> | null>(null);
 const { refreshCurrentUserMenus } = useAuthSession();
 
 const roleForm = reactive<SystemRoleCreatePayload>({
@@ -66,10 +74,16 @@ const permissionTreeProps = {
   children: 'children',
   disabled: 'disabled',
 };
+const deptTreeProps = {
+  label: 'deptName',
+  children: 'children',
+};
+const canSaveDeptScope = computed(() => assigningRole.value?.dataScopeType === 'custom_dept');
 const roleTypeText = (role: SystemRole) => (role.preset ? '预置角色' : '自定义角色');
 const statusText = (status: string) => (status === 'enabled' ? '启用' : '停用');
 const permissionStatusText = (status: string) => (status === 'enabled' ? '启用' : '停用');
-const dataScopeStatusText = () => '预留';
+const dataScopeStatusText = (scope: string) => (scope === 'custom_dept' ? '可维护' : '规则已定义');
+const dataScopeTagType = (scope: string) => (scope === 'custom_dept' ? 'success' : 'info');
 const dataScopeText = (scope: string) => {
   const labels: Record<string, string> = {
     all: '全部数据',
@@ -204,6 +218,10 @@ async function loadMenuTree(): Promise<void> {
 
 async function loadPermissions(): Promise<void> {
   permissions.value = await systemApi.listPermissions();
+}
+
+async function loadDepartmentTree(): Promise<void> {
+  deptTree.value = await systemApi.listDepartmentTree();
 }
 
 function resetRoleForm(): void {
@@ -351,6 +369,41 @@ async function savePermissionAssign(): Promise<void> {
   }
 }
 
+async function openDataScopeAssign(role: SystemRole): Promise<void> {
+  assigningRole.value = role;
+  dataScopeDialogVisible.value = true;
+  try {
+    await loadDepartmentTree();
+    await nextTick();
+    if (role.dataScopeType !== 'custom_dept') {
+      deptScopeTreeRef.value?.setCheckedKeys([], false);
+      return;
+    }
+    const selectedDeptIds = await systemApi.listRoleDeptScopeIds(role.roleId);
+    deptScopeTreeRef.value?.setCheckedKeys(selectedDeptIds, false);
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '数据范围加载失败'));
+  }
+}
+
+async function saveDataScopeAssign(): Promise<void> {
+  if (!assigningRole.value || !deptScopeTreeRef.value || assigningRole.value.dataScopeType !== 'custom_dept') {
+    return;
+  }
+  saving.value = true;
+  try {
+    // 自定义部门范围只提交真实勾选节点，父子联动由 Element Plus 树组件负责。
+    const deptIds = deptScopeTreeRef.value.getCheckedKeys(false).map(String);
+    await systemApi.saveRoleDeptScopes(assigningRole.value.roleId, { deptIds });
+    showSuccessMessage('数据范围已保存');
+    dataScopeDialogVisible.value = false;
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '数据范围保存失败'));
+  } finally {
+    saving.value = false;
+  }
+}
+
 onMounted(loadRoles);
 </script>
 
@@ -359,7 +412,7 @@ onMounted(loadRoles);
     <div class="system-page__header">
       <div>
         <h2 class="section-heading__title">角色管理</h2>
-        <p class="section-heading__desc">维护角色基础信息，并分别配置菜单入口和后端接口权限。</p>
+        <p class="section-heading__desc">维护角色基础信息，并分别配置菜单入口、接口权限和数据范围。</p>
       </div>
       <el-button type="primary" @click="openCreateRole">新增角色</el-button>
     </div>
@@ -376,7 +429,9 @@ onMounted(loadRoles);
         <template #default="{ row }">
           <div class="role-data-scope-cell">
             <span>{{ dataScopeText(row.dataScopeType) }}</span>
-            <el-tag size="small" type="info">{{ dataScopeStatusText() }}</el-tag>
+            <el-tag size="small" :type="dataScopeTagType(row.dataScopeType)">
+              {{ dataScopeStatusText(row.dataScopeType) }}
+            </el-tag>
           </div>
         </template>
       </el-table-column>
@@ -387,11 +442,12 @@ onMounted(loadRoles);
       </el-table-column>
       <el-table-column prop="sortOrder" label="排序" width="80" />
       <el-table-column prop="remark" label="备注" min-width="180" />
-      <el-table-column label="操作" width="290" fixed="right">
+      <el-table-column label="操作" width="350" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEditRole(row)">编辑</el-button>
           <el-button link type="primary" @click="openMenuAssign(row)">菜单授权</el-button>
           <el-button link type="primary" @click="openPermissionAssign(row)">接口权限</el-button>
+          <el-button link type="primary" @click="openDataScopeAssign(row)">数据范围</el-button>
           <el-button link type="danger" :disabled="row.preset" @click="deleteRole(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -414,9 +470,11 @@ onMounted(loadRoles);
           </el-select>
         </el-form-item>
         <div class="role-data-scope-help">
-          <div v-for="item in DATA_SCOPE_DESCRIPTIONS" :key="item.scope" class="role-data-scope-help__item">
+          <div v-for="item in DATA_SCOPE_DESCRIPTIONS" :key="item.value" class="role-data-scope-help__item">
             <strong>{{ item.scope }}</strong>
-            <el-tag size="small" type="info">预留</el-tag>
+            <el-tag size="small" :type="dataScopeTagType(item.value)">
+              {{ dataScopeStatusText(item.value) }}
+            </el-tag>
             <span>{{ item.description }}</span>
           </div>
         </div>
@@ -436,6 +494,38 @@ onMounted(loadRoles);
       <template #footer>
         <el-button @click="roleDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submitRole">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="dataScopeDialogVisible" title="数据范围" width="720px">
+      <p class="system-page__hint">当前角色：{{ assigningRole?.roleName }}</p>
+      <p class="system-page__hint">当前规则：{{ dataScopeText(assigningRole?.dataScopeType ?? '') }}</p>
+      <el-alert
+        show-icon
+        :closable="false"
+        type="info"
+        title="数据范围规则已支持保存和解析；用户管理列表已接入过滤，其他业务域仍需逐步接入。"
+      />
+      <el-tree
+        v-if="assigningRole?.dataScopeType === 'custom_dept'"
+        ref="deptScopeTreeRef"
+        :data="deptTree"
+        show-checkbox
+        node-key="deptId"
+        default-expand-all
+        :props="deptTreeProps"
+        class="dept-scope-tree"
+      />
+      <el-empty
+        v-else
+        description="当前规则由后端按登录人部门自动解析，无需维护部门范围"
+        class="dept-scope-empty"
+      />
+      <template #footer>
+        <el-button @click="dataScopeDialogVisible = false">取消</el-button>
+        <el-button v-if="canSaveDeptScope" type="primary" :loading="saving" @click="saveDataScopeAssign">
+          保存范围
+        </el-button>
       </template>
     </el-dialog>
 
@@ -529,6 +619,17 @@ onMounted(loadRoles);
   max-height: 560px;
   overflow-y: auto;
   padding-right: 6px;
+}
+
+.dept-scope-tree {
+  max-height: 520px;
+  margin-top: 14px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.dept-scope-empty {
+  margin-top: 12px;
 }
 
 .permission-tree-node {

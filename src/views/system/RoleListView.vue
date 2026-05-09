@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import { ElTree } from 'element-plus';
 import { useAuthSession } from '@/auth/auth-session';
+import { usePermission } from '@/auth/permissions';
 import { systemApi } from '@/api/modules/system';
 import type {
   EntityId,
@@ -56,6 +57,7 @@ const menuAuthTreeRef = ref<InstanceType<typeof ElTree> | null>(null);
 const permissionAuthTreeRef = ref<InstanceType<typeof ElTree> | null>(null);
 const deptScopeTreeRef = ref<InstanceType<typeof ElTree> | null>(null);
 const { refreshCurrentUserMenus } = useAuthSession();
+const { hasPermission } = usePermission();
 
 const roleForm = reactive<SystemRoleCreatePayload>({
   roleCode: '',
@@ -72,13 +74,39 @@ const permissionTree = computed(() => buildPermissionTree());
 const permissionTreeProps = {
   label: 'label',
   children: 'children',
-  disabled: 'disabled',
+  disabled: (data: unknown) => !canSaveRolePermissions.value || Boolean((data as PermissionTreeNode).disabled),
+};
+const menuAuthTreeProps = {
+  label: 'menuName',
+  children: 'children',
+  disabled: () => !canSaveRoleMenus.value,
 };
 const deptTreeProps = {
   label: 'deptName',
   children: 'children',
+  disabled: () => !canSaveRoleDeptScopes.value,
 };
-const canSaveDeptScope = computed(() => assigningRole.value?.dataScopeType === 'custom_dept');
+const canCreateRole = computed(() => hasPermission('system:role:create'));
+const canUpdateRole = computed(() => hasPermission('system:role:update'));
+const canDeleteRole = computed(() => hasPermission('system:role:delete'));
+const canSaveRoleMenus = computed(() => hasPermission('system:role:menu-save'));
+const canSaveRolePermissions = computed(() => hasPermission('system:role:permission-save'));
+const canSaveRoleDeptScopes = computed(() => hasPermission('system:role:dept-scope-save'));
+// 授权弹窗入口只依赖查询类权限；保存按钮独立依赖写权限，支持只读授权核对场景。
+const canViewRoleMenus = computed(() => hasPermission('system:role:menu-query'));
+const canViewRolePermissions = computed(() => hasPermission('system:role:permission-query'));
+const canViewRoleDeptScopes = computed(() => hasPermission('system:role:dept-scope-query'));
+const canOperateRole = computed(() =>
+  canUpdateRole.value ||
+    canDeleteRole.value ||
+    canViewRoleMenus.value ||
+    canViewRolePermissions.value ||
+    canViewRoleDeptScopes.value,
+);
+const canSubmitRole = computed(() => (roleFormMode.value === 'create' ? canCreateRole.value : canUpdateRole.value));
+const canSaveDeptScope = computed(() =>
+  canSaveRoleDeptScopes.value && assigningRole.value?.dataScopeType === 'custom_dept',
+);
 const roleTypeText = (role: SystemRole) => (role.preset ? '预置角色' : '自定义角色');
 const statusText = (status: string) => (status === 'enabled' ? '启用' : '停用');
 const permissionStatusText = (status: string) => (status === 'enabled' ? '启用' : '停用');
@@ -113,6 +141,38 @@ function moduleNameText(moduleCode: string): string {
 
 function flattenMenus(nodes: SystemMenuManagementNode[]): SystemMenuManagementNode[] {
   return nodes.flatMap((node) => [node, ...flattenMenus(node.children ?? [])]);
+}
+
+function hasSelectedDescendant(menu: SystemMenuManagementNode, selectedIds: Set<string>): boolean {
+  return (menu.children ?? []).some((child) => selectedIds.has(String(child.menuId)) || hasSelectedDescendant(child, selectedIds));
+}
+
+function resolveMenuCheckedKeys(menuIds: EntityId[]): string[] {
+  const selectedIds = new Set(menuIds.map(String));
+  /*
+   * 历史数据可能同时保存了父菜单和子菜单。
+   * 回显时跳过已有子级授权的父菜单，让父级只作为半选展示，重新保存后可自然清理旧父级授权。
+   */
+  return flattenMenus(menuTree.value)
+    .filter((menu) => selectedIds.has(String(menu.menuId)) && !hasSelectedDescendant(menu, selectedIds))
+    .map((menu) => String(menu.menuId));
+}
+
+function resolveMenuIdsForSave(menuIds: EntityId[]): string[] {
+  const selectedIds = new Set(menuIds.map(String));
+  /*
+   * 保存时同样剔除被子级覆盖的父菜单。
+   * 当前用户菜单查询会补齐祖先目录，数据库授权只记录真正需要开放的菜单节点。
+   */
+  return flattenMenus(menuTree.value)
+    .filter((menu) => selectedIds.has(String(menu.menuId)) && !hasSelectedDescendant(menu, selectedIds))
+    .map((menu) => String(menu.menuId));
+}
+
+function hasSameMenuIds(leftIds: EntityId[], rightIds: EntityId[]): boolean {
+  const left = new Set(leftIds.map(String));
+  const right = new Set(rightIds.map(String));
+  return left.size === right.size && Array.from(left).every((menuId) => right.has(menuId));
 }
 
 function menuCodeToModuleCode(menuCode: string): string {
@@ -198,7 +258,10 @@ function buildPermissionLeafNodes(items: SystemPermission[]): PermissionTreeNode
 }
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
-  return isApiRequestError(error) ? error.message : fallback;
+  if (isApiRequestError(error) || error instanceof Error) {
+    return error.message;
+  }
+  return fallback;
 }
 
 async function loadRoles(): Promise<void> {
@@ -210,18 +273,6 @@ async function loadRoles(): Promise<void> {
   } finally {
     loading.value = false;
   }
-}
-
-async function loadMenuTree(): Promise<void> {
-  menuTree.value = await systemApi.listMenuTree();
-}
-
-async function loadPermissions(): Promise<void> {
-  permissions.value = await systemApi.listPermissions();
-}
-
-async function loadDepartmentTree(): Promise<void> {
-  deptTree.value = await systemApi.listDepartmentTree();
 }
 
 function resetRoleForm(): void {
@@ -300,10 +351,18 @@ async function openMenuAssign(role: SystemRole): Promise<void> {
   assigningRole.value = role;
   menuDialogVisible.value = true;
   try {
-    await loadMenuTree();
-    const checkedMenuIds = await systemApi.listRoleMenuIds(role.roleId);
+    const authorization = await systemApi.getRoleMenuAuthorization(role.roleId);
+    menuTree.value = authorization.menus;
+    const checkedKeys = resolveMenuCheckedKeys(authorization.assignedMenuIds);
     await nextTick();
-    menuAuthTreeRef.value?.setCheckedKeys(checkedMenuIds, false);
+    menuAuthTreeRef.value?.setCheckedKeys([], false);
+    checkedKeys.forEach((menuId) => {
+      /*
+       * 角色菜单授权必须按数据库中的真实菜单ID精确回显。
+       * 不能深度勾选父节点，否则历史父级授权会把同级子菜单一并勾上。
+       */
+      menuAuthTreeRef.value?.setChecked(menuId, true, false);
+    });
   } catch (error) {
     showErrorMessage(resolveErrorMessage(error, '菜单授权加载失败'));
   }
@@ -315,11 +374,18 @@ async function saveMenuAssign(): Promise<void> {
   }
   saving.value = true;
   try {
-    // 后端 Long ID 以字符串传输，授权保存不能转 number，避免精度丢失。
+    /*
+     * 只保存真实勾选节点，不提交半选父节点。
+     * 半选父节点只是树形展示状态，提交后会在下次回填时联动勾选同级菜单。
+     */
     const checkedKeys = menuAuthTreeRef.value.getCheckedKeys(false).map(String);
-    const halfCheckedKeys = menuAuthTreeRef.value.getHalfCheckedKeys().map(String);
-    const menuIds = Array.from(new Set([...checkedKeys, ...halfCheckedKeys]));
+    const menuIds = resolveMenuIdsForSave(Array.from(new Set(checkedKeys)));
     await systemApi.saveRoleMenus(assigningRole.value.roleId, { menuIds });
+    const savedAuthorization = await systemApi.getRoleMenuAuthorization(assigningRole.value.roleId);
+    const savedMenuIds = savedAuthorization.assignedMenuIds;
+    if (!hasSameMenuIds(menuIds, savedMenuIds)) {
+      throw new Error('菜单授权保存后回显不一致，请刷新页面后重新保存');
+    }
     await refreshCurrentUserMenus();
     showSuccessMessage('菜单授权已保存');
     menuDialogVisible.value = false;
@@ -334,11 +400,12 @@ async function openPermissionAssign(role: SystemRole): Promise<void> {
   assigningRole.value = role;
   permissionDialogVisible.value = true;
   try {
-    await Promise.all([loadMenuTree(), loadPermissions()]);
-    const selectedPermissionIds = await systemApi.listRolePermissionIds(role.roleId);
+    const authorization = await systemApi.getRolePermissionAuthorization(role.roleId);
+    menuTree.value = authorization.menus;
+    permissions.value = authorization.permissions;
     await nextTick();
     // Element Plus 树节点渲染完成后再回填勾选状态，否则首屏可能无法正确选中。
-    permissionAuthTreeRef.value?.setCheckedKeys(selectedPermissionIds.map(permissionNodeKey), false);
+    permissionAuthTreeRef.value?.setCheckedKeys(authorization.assignedPermissionIds.map(permissionNodeKey), false);
   } catch (error) {
     showErrorMessage(resolveErrorMessage(error, '接口权限加载失败'));
   }
@@ -360,6 +427,7 @@ async function savePermissionAssign(): Promise<void> {
     await systemApi.saveRolePermissions(assigningRole.value.roleId, {
       permissionIds,
     });
+    await refreshCurrentUserMenus();
     showSuccessMessage('接口权限已保存');
     permissionDialogVisible.value = false;
   } catch (error) {
@@ -373,14 +441,14 @@ async function openDataScopeAssign(role: SystemRole): Promise<void> {
   assigningRole.value = role;
   dataScopeDialogVisible.value = true;
   try {
-    await loadDepartmentTree();
+    const authorization = await systemApi.getRoleDeptScopeAuthorization(role.roleId);
+    deptTree.value = authorization.departments;
     await nextTick();
     if (role.dataScopeType !== 'custom_dept') {
       deptScopeTreeRef.value?.setCheckedKeys([], false);
       return;
     }
-    const selectedDeptIds = await systemApi.listRoleDeptScopeIds(role.roleId);
-    deptScopeTreeRef.value?.setCheckedKeys(selectedDeptIds, false);
+    deptScopeTreeRef.value?.setCheckedKeys(authorization.assignedDeptIds.map(String), false);
   } catch (error) {
     showErrorMessage(resolveErrorMessage(error, '数据范围加载失败'));
   }
@@ -414,7 +482,10 @@ onMounted(loadRoles);
         <h2 class="section-heading__title">角色管理</h2>
         <p class="section-heading__desc">维护角色基础信息，并分别配置菜单入口、接口权限和数据范围。</p>
       </div>
-      <el-button type="primary" @click="openCreateRole">新增角色</el-button>
+      <div class="system-page__actions">
+        <el-button :loading="loading" @click="loadRoles">刷新</el-button>
+        <el-button v-if="canCreateRole" type="primary" @click="openCreateRole">新增角色</el-button>
+      </div>
     </div>
 
     <el-table v-loading="loading" :data="roles" border row-key="roleId" class="system-page__table">
@@ -442,18 +513,24 @@ onMounted(loadRoles);
       </el-table-column>
       <el-table-column prop="sortOrder" label="排序" width="80" />
       <el-table-column prop="remark" label="备注" min-width="180" />
-      <el-table-column label="操作" width="350" fixed="right">
+      <el-table-column v-if="canOperateRole" label="操作" width="350" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openEditRole(row)">编辑</el-button>
-          <el-button link type="primary" @click="openMenuAssign(row)">菜单授权</el-button>
-          <el-button link type="primary" @click="openPermissionAssign(row)">接口权限</el-button>
-          <el-button link type="primary" @click="openDataScopeAssign(row)">数据范围</el-button>
-          <el-button link type="danger" :disabled="row.preset" @click="deleteRole(row)">删除</el-button>
+          <el-button v-if="canUpdateRole" link type="primary" @click="openEditRole(row)">编辑</el-button>
+          <el-button v-if="canViewRoleMenus" link type="primary" @click="openMenuAssign(row)">菜单授权</el-button>
+          <el-button v-if="canViewRolePermissions" link type="primary" @click="openPermissionAssign(row)">
+            接口权限
+          </el-button>
+          <el-button v-if="canViewRoleDeptScopes" link type="primary" @click="openDataScopeAssign(row)">
+            数据范围
+          </el-button>
+          <el-button v-if="canDeleteRole" link type="danger" :disabled="row.preset" @click="deleteRole(row)">
+            删除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="roleDialogVisible" :title="roleDialogTitle" width="560px">
+    <el-dialog v-model="roleDialogVisible" :title="roleDialogTitle" width="560px" align-center>
       <el-form label-width="96px">
         <el-form-item label="角色编码" required>
           <el-input v-model="roleForm.roleCode" :disabled="roleFormMode === 'edit'" maxlength="64" />
@@ -493,11 +570,11 @@ onMounted(loadRoles);
       </el-form>
       <template #footer>
         <el-button @click="roleDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitRole">保存</el-button>
+        <el-button v-if="canSubmitRole" type="primary" :loading="saving" @click="submitRole">保存</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="dataScopeDialogVisible" title="数据范围" width="720px">
+    <el-dialog v-model="dataScopeDialogVisible" title="数据范围" width="720px" align-center>
       <p class="system-page__hint">当前角色：{{ assigningRole?.roleName }}</p>
       <p class="system-page__hint">当前规则：{{ dataScopeText(assigningRole?.dataScopeType ?? '') }}</p>
       <el-alert
@@ -529,7 +606,7 @@ onMounted(loadRoles);
       </template>
     </el-dialog>
 
-    <el-dialog v-model="menuDialogVisible" title="菜单授权" width="640px">
+    <el-dialog v-model="menuDialogVisible" title="菜单授权" width="640px" align-center>
       <p class="system-page__hint">当前角色：{{ assigningRole?.roleName }}</p>
       <p class="system-page__hint">菜单授权只控制左侧导航和页面入口，不再自动授予接口权限。</p>
       <el-tree
@@ -538,15 +615,15 @@ onMounted(loadRoles);
         show-checkbox
         node-key="menuId"
         default-expand-all
-        :props="{ label: 'menuName', children: 'children' }"
+        :props="menuAuthTreeProps"
       />
       <template #footer>
         <el-button @click="menuDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveMenuAssign">保存授权</el-button>
+        <el-button v-if="canSaveRoleMenus" type="primary" :loading="saving" @click="saveMenuAssign">保存授权</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="permissionDialogVisible" title="接口权限" width="860px">
+    <el-dialog v-model="permissionDialogVisible" title="接口权限" width="860px" align-center>
       <p class="system-page__hint">当前角色：{{ assigningRole?.roleName }}</p>
       <p class="system-page__hint">仅展示已登记的接口权限；操作权限和数据范围权限暂不参与这里的接口授权。</p>
       <el-tree
@@ -578,7 +655,9 @@ onMounted(loadRoles);
       </el-tree>
       <template #footer>
         <el-button @click="permissionDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="savePermissionAssign">保存权限</el-button>
+        <el-button v-if="canSaveRolePermissions" type="primary" :loading="saving" @click="savePermissionAssign">
+          保存权限
+        </el-button>
       </template>
     </el-dialog>
   </section>

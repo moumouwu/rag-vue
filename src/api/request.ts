@@ -3,6 +3,7 @@ import type { ApiErrorResponse, ApiSuccessResponse, StageCode } from '../types';
 export interface ApiClientConfig {
   baseUrl?: string;
   getAccessToken?: () => string | null | undefined;
+  onForbidden?: () => void;
   defaultHeaders?: Record<string, string>;
   fetcher?: typeof fetch;
 }
@@ -14,6 +15,7 @@ export interface ApiRequestOptions<TBody = unknown> {
   headers?: Record<string, string>;
   signal?: AbortSignal;
   skipAuth?: boolean;
+  suppressForbiddenRedirect?: boolean;
 }
 
 const DEFAULT_STAGE_CODE: StageCode = 'failed';
@@ -171,6 +173,10 @@ export async function request<TData, TBody = unknown>(options: ApiRequestOptions
 
   const payload = await parseJsonSafely(response);
   if (!response.ok) {
+    if (response.status === 403 && !options.suppressForbiddenRedirect) {
+      // 主业务接口返回 403 时统一进入无权限页；辅助接口可显式关闭，避免阻断页面降级渲染。
+      clientConfig.onForbidden?.();
+    }
     throw new ApiRequestError(
       normalizeErrorPayload(payload, `请求失败，HTTP 状态码 ${response.status}`, response.status),
       response.status,

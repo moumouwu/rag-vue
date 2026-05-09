@@ -8,6 +8,14 @@ import type {
   SystemPermissionCreatePayload,
   SystemPermissionQuery,
   SystemPermissionUpdatePayload,
+  SystemLoginLog,
+  SystemLoginLogArchive,
+  SystemLoginLogArchiveQuery,
+  SystemLoginLogQuery,
+  SystemOperationLog,
+  SystemOperationLogArchive,
+  SystemOperationLogArchiveQuery,
+  SystemOperationLogQuery,
   SystemDictItem,
   SystemDictItemCreatePayload,
   SystemDictItemUpdatePayload,
@@ -16,15 +24,24 @@ import type {
   SystemDictTypeQuery,
   SystemDictTypeUpdatePayload,
   SystemUser,
+  SystemUserCreatePayload,
+  SystemUserDetail,
   SystemUserQuery,
+  SystemUserRoleAuthorization,
+  SystemUserRoleAssignPayload,
+  SystemUserStatusUpdatePayload,
+  SystemUserUpdatePayload,
   SystemDept,
   SystemDeptCreatePayload,
   SystemDeptStatusUpdatePayload,
   SystemDeptUpdatePayload,
   SystemRole,
   SystemRoleCreatePayload,
+  SystemRoleDeptScopeAuthorization,
   SystemRoleDeptScopeAssignPayload,
+  SystemRoleMenuAuthorization,
   SystemRoleMenuAssignPayload,
+  SystemRolePermissionAuthorization,
   SystemRolePermissionAssignPayload,
   SystemRoleUpdatePayload,
   EntityId,
@@ -61,6 +78,39 @@ export const systemApi = {
     }));
   },
 
+  // 用户详情用于编辑表单和角色授权回显，后端会返回审计字段和有效角色 ID。
+  getUser(userId: EntityId): Promise<SystemUserDetail> {
+    return apiRequest.get<SystemUserDetail>(`/api/v1/system/users/${userId}`);
+  },
+
+  // 创建用户时只提交初始明文密码，后端负责生成摘要并写入首批角色关系。
+  createUser(payload: SystemUserCreatePayload): Promise<SystemUserDetail> {
+    return apiRequest.post<SystemUserDetail, SystemUserCreatePayload>('/api/v1/system/users', payload);
+  },
+
+  // 编辑用户不允许改用户名和密码，避免登录标识在历史审计中漂移。
+  updateUser(userId: EntityId, payload: SystemUserUpdatePayload): Promise<SystemUserDetail> {
+    return apiRequest.put<SystemUserDetail, SystemUserUpdatePayload>(`/api/v1/system/users/${userId}`, payload);
+  },
+
+  // 启停用户走独立接口，停用后的登录和受保护接口访问由后端认证链路拦截。
+  updateUserStatus(userId: EntityId, payload: SystemUserStatusUpdatePayload): Promise<SystemUserDetail> {
+    return apiRequest.put<SystemUserDetail, SystemUserStatusUpdatePayload>(
+      `/api/v1/system/users/${userId}/status`,
+      payload,
+    );
+  },
+
+  // 用户角色授权查询直接返回可选角色和已选 ID，避免授权弹窗额外依赖角色列表接口权限。
+  getUserRoleAuthorization(userId: EntityId): Promise<SystemUserRoleAuthorization> {
+    return apiRequest.get<SystemUserRoleAuthorization>(`/api/v1/system/users/${userId}/role-authorization`);
+  },
+
+  // 保存用户角色关系采用覆盖语义，空数组表示清空用户角色。
+  saveUserRoles(userId: EntityId, payload: SystemUserRoleAssignPayload): Promise<void> {
+    return apiRequest.put<void, SystemUserRoleAssignPayload>(`/api/v1/system/users/${userId}/roles`, payload);
+  },
+
   // 角色列表承载角色基础信息，数据范围规则已可维护，业务列表需接入后才会生效。
   listRoles(): Promise<SystemRole[]> {
     return apiRequest.get<SystemRole[]>('/api/v1/system/roles');
@@ -81,9 +131,9 @@ export const systemApi = {
     return apiRequest.delete<void>(`/api/v1/system/roles/${roleId}`);
   },
 
-  // 查询角色已授权菜单 ID，用于菜单树回显勾选状态。
-  listRoleMenuIds(roleId: EntityId): Promise<EntityId[]> {
-    return apiRequest.get<EntityId[]>(`/api/v1/system/roles/${roleId}/menu-ids`);
+  // 角色菜单授权查询聚合菜单树和已选 ID，不能再依赖菜单管理树接口权限。
+  getRoleMenuAuthorization(roleId: EntityId): Promise<SystemRoleMenuAuthorization> {
+    return apiRequest.get<SystemRoleMenuAuthorization>(`/api/v1/system/roles/${roleId}/menu-authorization`);
   },
 
   // 保存菜单授权只影响导航入口，不同步接口权限。
@@ -103,7 +153,7 @@ export const systemApi = {
     }));
   },
 
-  // 角色授权树需要完整接口权限清单；通过分页循环拉取，避免依赖后端一次性全量返回。
+  // 权限管理页仍按分页维护；授权弹窗使用聚合授权接口，不再调用本方法。
   async listPermissions(): Promise<SystemPermission[]> {
     const pageSize = 100;
     const firstPage = await systemApi.pagePermissions({ pageNo: 1, pageSize, permissionType: 'api' });
@@ -134,6 +184,84 @@ export const systemApi = {
   // 删除权限受预置权限和角色授权引用保护。
   deletePermission(permissionId: EntityId): Promise<void> {
     return apiRequest.delete<void>(`/api/v1/system/permissions/${permissionId}`);
+  },
+
+  // 登录日志只提供分页查询，日志写入由后端认证链路统一完成，前端不得手动构造日志数据。
+  listLoginLogs(query: SystemLoginLogQuery): Promise<PageData<SystemLoginLog>> {
+    return apiRequest.get<PageData<SystemLoginLog>>(buildQueryUrl('/api/v1/system/logs/login', {
+      pageNo: query.pageNo,
+      pageSize: query.pageSize,
+      userId: query.userId,
+      username: query.username,
+      loginMethod: query.loginMethod,
+      eventType: query.eventType,
+      result: query.result,
+      ipAddress: query.ipAddress,
+      requestId: query.requestId,
+      startTime: query.startTime,
+      endTime: query.endTime,
+    }));
+  },
+
+  // 归档登录日志属于冷数据，必须使用独立权限，避免热日志查询权限扩大到长期归档数据。
+  listLoginLogArchives(query: SystemLoginLogArchiveQuery): Promise<PageData<SystemLoginLogArchive>> {
+    return apiRequest.get<PageData<SystemLoginLogArchive>>(buildQueryUrl('/api/v1/system/logs/login/archive', {
+      pageNo: query.pageNo,
+      pageSize: query.pageSize,
+      sourceLogId: query.sourceLogId,
+      archiveBatchNo: query.archiveBatchNo,
+      archiveStartTime: query.archiveStartTime,
+      archiveEndTime: query.archiveEndTime,
+      userId: query.userId,
+      username: query.username,
+      loginMethod: query.loginMethod,
+      eventType: query.eventType,
+      result: query.result,
+      ipAddress: query.ipAddress,
+      requestId: query.requestId,
+      startTime: query.startTime,
+      endTime: query.endTime,
+    }));
+  },
+
+  // 操作日志只展示后端写入的操作摘要，不能依赖前端自行拼接操作记录。
+  listOperationLogs(query: SystemOperationLogQuery): Promise<PageData<SystemOperationLog>> {
+    return apiRequest.get<PageData<SystemOperationLog>>(buildQueryUrl('/api/v1/system/logs/operations', {
+      pageNo: query.pageNo,
+      pageSize: query.pageSize,
+      operatorId: query.operatorId,
+      operatorName: query.operatorName,
+      moduleCode: query.moduleCode,
+      operationType: query.operationType,
+      targetType: query.targetType,
+      targetId: query.targetId,
+      result: query.result,
+      requestId: query.requestId,
+      startTime: query.startTime,
+      endTime: query.endTime,
+    }));
+  },
+
+  // 归档操作日志用于长期审计回查，前端只做查询，不提供恢复、导出或物理清理入口。
+  listOperationLogArchives(query: SystemOperationLogArchiveQuery): Promise<PageData<SystemOperationLogArchive>> {
+    return apiRequest.get<PageData<SystemOperationLogArchive>>(buildQueryUrl('/api/v1/system/logs/operations/archive', {
+      pageNo: query.pageNo,
+      pageSize: query.pageSize,
+      sourceLogId: query.sourceLogId,
+      archiveBatchNo: query.archiveBatchNo,
+      archiveStartTime: query.archiveStartTime,
+      archiveEndTime: query.archiveEndTime,
+      operatorId: query.operatorId,
+      operatorName: query.operatorName,
+      moduleCode: query.moduleCode,
+      operationType: query.operationType,
+      targetType: query.targetType,
+      targetId: query.targetId,
+      result: query.result,
+      requestId: query.requestId,
+      startTime: query.startTime,
+      endTime: query.endTime,
+    }));
   },
 
   // 字典类型会持续增长，列表必须走后端分页，前端只传筛选条件不自行裁剪全量数据。
@@ -194,9 +322,11 @@ export const systemApi = {
     return apiRequest.delete<void>(`/api/v1/system/dicts/types/${typeId}/items/${itemId}`);
   },
 
-  // 查询角色已授权接口权限 ID，用于接口权限树回显。
-  listRolePermissionIds(roleId: EntityId): Promise<EntityId[]> {
-    return apiRequest.get<EntityId[]>(`/api/v1/system/roles/${roleId}/permission-ids`);
+  // 角色接口权限授权查询聚合菜单分组、接口权限和已选 ID，避免弹窗额外依赖权限列表或菜单树权限。
+  getRolePermissionAuthorization(roleId: EntityId): Promise<SystemRolePermissionAuthorization> {
+    return apiRequest.get<SystemRolePermissionAuthorization>(
+      `/api/v1/system/roles/${roleId}/permission-authorization`,
+    );
   },
 
   // 保存接口权限授权直接维护角色-权限关系，不依赖菜单。
@@ -207,9 +337,11 @@ export const systemApi = {
     );
   },
 
-  // 查询角色自定义部门范围，用于数据范围树回显；非 custom_dept 角色只作为兼容查询。
-  listRoleDeptScopeIds(roleId: EntityId): Promise<EntityId[]> {
-    return apiRequest.get<EntityId[]>(`/api/v1/system/roles/${roleId}/dept-scope-ids`);
+  // 角色数据范围授权查询聚合部门树和已选 ID，避免弹窗额外依赖部门树接口权限。
+  getRoleDeptScopeAuthorization(roleId: EntityId): Promise<SystemRoleDeptScopeAuthorization> {
+    return apiRequest.get<SystemRoleDeptScopeAuthorization>(
+      `/api/v1/system/roles/${roleId}/dept-scope-authorization`,
+    );
   },
 
   // 保存角色自定义部门范围，只在角色数据范围为 custom_dept 时调用。
@@ -247,7 +379,7 @@ export const systemApi = {
 
   // 部门树用于组织结构展示和父级部门选择。
   listDepartmentTree(): Promise<SystemDept[]> {
-    return apiRequest.get<SystemDept[]>('/api/v1/system/depts/tree');
+    return apiRequest.get<SystemDept[]>('/api/v1/system/depts/tree', { suppressForbiddenRedirect: true });
   },
 
   // 创建部门允许 deptCode 为空，后端会生成可读部门编码。

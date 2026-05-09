@@ -1,4 +1,4 @@
-import type { CurrentUserInfo, LoginCommand, LoginResult } from '@/types';
+import type { CurrentUserInfo, LoginCommand, LoginResult, SsoCallbackCommand, SsoLoginInit } from '@/types';
 import { apiRequest } from '../request';
 
 export const authApi = {
@@ -6,6 +6,20 @@ export const authApi = {
   login(command: LoginCommand): Promise<LoginResult> {
     return apiRequest.post<LoginResult, LoginCommand>('/api/v1/auth/login', command, {
       // 登录接口不应携带历史令牌，避免过期 token 干扰重新登录。
+      skipAuth: true,
+    });
+  },
+
+  // 获取 SSO 入口地址；该接口公开访问，不能依赖前端已有登录态。
+  getSsoLoginUrl(): Promise<SsoLoginInit> {
+    return apiRequest.get<SsoLoginInit>('/api/v1/auth/sso/login-url', {
+      skipAuth: true,
+    });
+  },
+
+  // SSO 回调换取本系统令牌，返回结构必须和账号密码登录保持一致。
+  ssoCallback(command: SsoCallbackCommand): Promise<LoginResult> {
+    return apiRequest.post<LoginResult, SsoCallbackCommand>('/api/v1/auth/sso/callback', command, {
       skipAuth: true,
     });
   },

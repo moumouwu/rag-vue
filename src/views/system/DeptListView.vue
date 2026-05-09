@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { usePermission } from '@/auth/permissions';
 import { systemApi } from '@/api/modules/system';
 import { isApiRequestError } from '@/api/request';
 import type {
@@ -27,6 +28,7 @@ const leaderPageNo = ref(1);
 const leaderPageSize = ref(10);
 const leaderTotal = ref(0);
 const selectedLeaderText = ref('');
+const { hasPermission, hasAnyPermission } = usePermission();
 
 const deptForm = reactive<SystemDeptCreatePayload>({
   deptCode: '',
@@ -48,6 +50,15 @@ const leaderFilters = reactive<SystemUserQuery>({
 
 const dialogTitle = computed(() => (formMode.value === 'create' ? '新增部门' : '编辑部门'));
 const statusText = (status: string) => (status === 'enabled' ? '启用' : '停用');
+const canCreateDept = computed(() => hasPermission('system:dept:create'));
+const canUpdateDept = computed(() => hasPermission('system:dept:update'));
+const canUpdateDeptStatus = computed(() => hasPermission('system:dept:status'));
+const canDeleteDept = computed(() => hasPermission('system:dept:delete'));
+const canSelectLeader = computed(() => hasPermission('system:user:list'));
+const canOperateDept = computed(() =>
+  hasAnyPermission(['system:dept:create', 'system:dept:update', 'system:dept:status', 'system:dept:delete']),
+);
+const canSubmitDept = computed(() => (formMode.value === 'create' ? canCreateDept.value : canUpdateDept.value));
 const leaderDisplayText = computed(() => {
   if (!deptForm.leaderUserId) {
     return '未选择';
@@ -281,7 +292,10 @@ onMounted(loadDepartmentTree);
         <h2 class="section-heading__title">部门管理</h2>
         <p class="section-heading__desc">维护组织部门树，为用户归属和后续数据范围提供基础。</p>
       </div>
-      <el-button type="primary" @click="openCreateDepartment()">新增根部门</el-button>
+      <div class="system-page__actions">
+        <el-button :loading="loading" @click="loadDepartmentTree">刷新</el-button>
+        <el-button v-if="canCreateDept" type="primary" @click="openCreateDepartment()">新增根部门</el-button>
+      </div>
     </div>
 
     <el-table
@@ -306,19 +320,21 @@ onMounted(loadDepartmentTree);
       </el-table-column>
       <el-table-column prop="sortOrder" label="排序" width="80" />
       <el-table-column prop="remark" label="备注" min-width="180" />
-      <el-table-column label="操作" width="250" fixed="right">
+      <el-table-column v-if="canOperateDept" label="操作" width="250" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openCreateDepartment(row.deptId)">新增下级</el-button>
-          <el-button link type="primary" @click="openEditDepartment(row)">编辑</el-button>
-          <el-button link type="warning" @click="switchDepartmentStatus(row)">
+          <el-button v-if="canCreateDept" link type="primary" @click="openCreateDepartment(row.deptId)">
+            新增下级
+          </el-button>
+          <el-button v-if="canUpdateDept" link type="primary" @click="openEditDepartment(row)">编辑</el-button>
+          <el-button v-if="canUpdateDeptStatus" link type="warning" @click="switchDepartmentStatus(row)">
             {{ row.deptStatus === 'enabled' ? '停用' : '启用' }}
           </el-button>
-          <el-button link type="danger" @click="deleteDepartment(row)">删除</el-button>
+          <el-button v-if="canDeleteDept" link type="danger" @click="deleteDepartment(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="720px" class="menu-edit-dialog">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="720px" align-center class="menu-edit-dialog">
       <el-form :model="deptForm" label-position="top" class="menu-form">
         <section class="menu-form__section menu-form__section--wide">
           <h3 class="menu-form__section-title">基础信息</h3>
@@ -347,7 +363,7 @@ onMounted(loadDepartmentTree);
             <el-form-item label="负责人">
               <div class="leader-picker">
                 <el-input :model-value="leaderDisplayText" readonly />
-                <el-button @click="openLeaderSelector">选择</el-button>
+                <el-button v-if="canSelectLeader" @click="openLeaderSelector">选择</el-button>
                 <el-button :disabled="!deptForm.leaderUserId" @click="clearLeader">清空</el-button>
               </div>
             </el-form-item>
@@ -376,11 +392,11 @@ onMounted(loadDepartmentTree);
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitDepartment">保存</el-button>
+        <el-button v-if="canSubmitDept" type="primary" :loading="saving" @click="submitDepartment">保存</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="leaderDialogVisible" title="选择负责人" width="780px">
+    <el-dialog v-model="leaderDialogVisible" title="选择负责人" width="780px" align-center>
       <div class="leader-selector__filters">
         <el-input
           v-model="leaderFilters.username"

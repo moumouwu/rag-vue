@@ -11,8 +11,10 @@ import NotFoundView from '@/views/NotFoundView.vue';
 import PlaceholderView from '@/views/PlaceholderView.vue';
 import PermissionListView from '@/views/system/PermissionListView.vue';
 import RoleListView from '@/views/system/RoleListView.vue';
+import SystemLogListView from '@/views/system/SystemLogListView.vue';
 import UserListView from '@/views/system/UserListView.vue';
 import TaskCenterWorkbenchView from '@/views/TaskCenterWorkbenchView.vue';
+import SsoCallbackView from '@/views/SsoCallbackView.vue';
 import { findFirstAuthorizedMenuPath, isAuthorizedMenuRoute } from './menu-permissions';
 
 declare module 'vue-router' {
@@ -61,6 +63,12 @@ const placeholderRoutes: RouteRecordRaw[] = [
     component: DictListView,
     meta: { title: '数据字典', menuCode: 'system.dict' },
   },
+  {
+    path: 'system/logs',
+    name: 'SystemLog',
+    component: SystemLogListView,
+    meta: { title: '系统日志', menuCode: 'system.log' },
+  },
   { path: 'ai', name: 'Ai', component: PlaceholderView, meta: { title: 'AI配置', menuCode: 'ai' } },
   {
     path: 'ai/models',
@@ -91,6 +99,7 @@ const placeholderRoutes: RouteRecordRaw[] = [
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'Login', component: LoginView, meta: { public: true, title: '登录' } },
+  { path: '/sso/callback', name: 'SsoCallback', component: SsoCallbackView, meta: { public: true, title: '单点登录回调' } },
   {
     path: '/',
     component: AdminLayout,

@@ -12,6 +12,12 @@ import './styles.css';
 configureApiClient({
   baseUrl: import.meta.env.VITE_API_BASE_URL?.trim() || '',
   getAccessToken: () => readAccessToken(),
+  onForbidden: () => {
+    // 接口鉴权失败统一落到无权限页，避免用户停留在半加载或空白页面。
+    if (!['/login', '/no-permission'].includes(router.currentRoute.value.path)) {
+      void router.replace({ path: '/no-permission', query: { reason: 'forbidden' } });
+    }
+  },
 });
 
 // 统一使用中文组件文案，避免分页、弹窗等基础控件暴露英文默认值。

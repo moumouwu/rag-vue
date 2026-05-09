@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { usePermission } from '@/auth/permissions';
 import { systemApi } from '@/api/modules/system';
 import { isApiRequestError } from '@/api/request';
 import type {
@@ -32,6 +33,7 @@ const typePageNo = ref(1);
 const typePageSize = ref(10);
 const typeTotal = ref(0);
 const itemKeyword = ref('');
+const { hasPermission, hasAnyPermission } = usePermission();
 
 const typeForm = reactive<SystemDictTypeCreatePayload>({
   dictTypeCode: '',
@@ -54,6 +56,24 @@ const selectedType = computed(() =>
 );
 const typeDialogTitle = computed(() => (typeFormMode.value === 'create' ? '新增字典类型' : '编辑字典类型'));
 const itemDialogTitle = computed(() => (itemFormMode.value === 'create' ? '新增字典项' : '编辑字典项'));
+const canCreateDictType = computed(() => hasPermission('system:dict:type:create'));
+const canUpdateDictType = computed(() => hasPermission('system:dict:type:update'));
+const canDeleteDictType = computed(() => hasPermission('system:dict:type:delete'));
+const canCreateDictItem = computed(() => hasPermission('system:dict:item:create'));
+const canUpdateDictItem = computed(() => hasPermission('system:dict:item:update'));
+const canDeleteDictItem = computed(() => hasPermission('system:dict:item:delete'));
+const canOperateDictType = computed(() =>
+  hasAnyPermission(['system:dict:type:update', 'system:dict:type:delete']),
+);
+const canOperateDictItem = computed(() =>
+  hasAnyPermission(['system:dict:item:update', 'system:dict:item:delete']),
+);
+const canSubmitDictType = computed(() =>
+  typeFormMode.value === 'create' ? canCreateDictType.value : canUpdateDictType.value,
+);
+const canSubmitDictItem = computed(() =>
+  itemFormMode.value === 'create' ? canCreateDictItem.value : canUpdateDictItem.value,
+);
 const currentPageEnabledTypeCount = computed(
   () => dictTypes.value.filter((dictType) => dictType.typeStatus === 'enabled').length,
 );
@@ -367,7 +387,7 @@ onMounted(loadTypes);
       </div>
       <div class="dict-actions">
         <el-button @click="loadTypes">刷新</el-button>
-        <el-button type="primary" @click="openCreateType">新增类型</el-button>
+        <el-button v-if="canCreateDictType" type="primary" @click="openCreateType">新增类型</el-button>
       </div>
     </div>
 
@@ -417,10 +437,12 @@ onMounted(loadTypes);
           <el-table-column label="预置" width="70">
             <template #default="{ row }">{{ row.preset ? '是' : '否' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="136" fixed="right">
+          <el-table-column v-if="canOperateDictType" label="操作" width="136" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click.stop="openEditType(row)">编辑</el-button>
-              <el-button link type="danger" :disabled="row.preset" @click.stop="deleteType(row)">删除</el-button>
+              <el-button v-if="canUpdateDictType" link type="primary" @click.stop="openEditType(row)">编辑</el-button>
+              <el-button v-if="canDeleteDictType" link type="danger" :disabled="row.preset" @click.stop="deleteType(row)">
+                删除
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -446,7 +468,9 @@ onMounted(loadTypes);
           </div>
           <div class="dict-item-actions">
             <el-input v-model="itemKeyword" clearable placeholder="搜索字典项" class="dict-panel__search" />
-            <el-button type="primary" :disabled="!selectedType" @click="openCreateItem">新增字典项</el-button>
+            <el-button v-if="canCreateDictItem" type="primary" :disabled="!selectedType" @click="openCreateItem">
+              新增字典项
+            </el-button>
           </div>
         </div>
         <el-table v-loading="itemLoading" :data="filteredItems" border row-key="dictItemId" class="system-page__table">
@@ -466,17 +490,19 @@ onMounted(loadTypes);
           </el-table-column>
           <el-table-column prop="sortOrder" label="排序" width="80" />
           <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
-          <el-table-column label="操作" width="150" fixed="right">
+          <el-table-column v-if="canOperateDictItem" label="操作" width="150" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openEditItem(row)">编辑</el-button>
-              <el-button link type="danger" :disabled="row.preset" @click="deleteItem(row)">删除</el-button>
+              <el-button v-if="canUpdateDictItem" link type="primary" @click="openEditItem(row)">编辑</el-button>
+              <el-button v-if="canDeleteDictItem" link type="danger" :disabled="row.preset" @click="deleteItem(row)">
+                删除
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
       </section>
     </div>
 
-    <el-dialog v-model="typeDialogVisible" :title="typeDialogTitle" width="620px">
+    <el-dialog v-model="typeDialogVisible" :title="typeDialogTitle" width="620px" align-center>
       <el-form :model="typeForm" label-position="top" class="dict-form">
         <el-form-item label="类型编码" required>
           <el-input
@@ -507,11 +533,11 @@ onMounted(loadTypes);
       </el-form>
       <template #footer>
         <el-button @click="typeDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitType">保存</el-button>
+        <el-button v-if="canSubmitDictType" type="primary" :loading="saving" @click="submitType">保存</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="itemDialogVisible" :title="itemDialogTitle" width="620px">
+    <el-dialog v-model="itemDialogVisible" :title="itemDialogTitle" width="620px" align-center>
       <el-form :model="itemForm" label-position="top" class="dict-form">
         <div class="dict-form__grid">
           <el-form-item label="字典项值" required>
@@ -542,7 +568,7 @@ onMounted(loadTypes);
       </el-form>
       <template #footer>
         <el-button @click="itemDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitItem">保存</el-button>
+        <el-button v-if="canSubmitDictItem" type="primary" :loading="saving" @click="submitItem">保存</el-button>
       </template>
     </el-dialog>
   </section>

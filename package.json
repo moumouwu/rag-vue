@@ -10,6 +10,8 @@
     "check": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@iconify-json/lucide": "^1.2.104",
+    "@iconify/vue": "^5.0.0",
     "element-plus": "^2.13.7",
     "vue": "^3.5.13",
     "vue-router": "^4.6.4"

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { usePermission } from '@/auth/permissions';
 import { systemApi } from '@/api/modules/system';
 import { isApiRequestError } from '@/api/request';
 import type {
@@ -49,6 +50,7 @@ const permissionStatusFilter = ref<SystemPermissionQuery['permissionStatus']>(''
 const permissionPageNo = ref(1);
 const permissionPageSize = ref(10);
 const permissionTotal = ref(0);
+const { hasPermission, hasAnyPermission } = usePermission();
 
 const permissionForm = reactive<SystemPermissionCreatePayload>({
   permissionCode: '',
@@ -91,6 +93,15 @@ const currentPageEnabledCount = computed(
   () => permissions.value.filter((permission) => permission.permissionStatus === 'enabled').length,
 );
 const dialogTitle = computed(() => (formMode.value === 'create' ? '新增权限' : '编辑权限'));
+const canCreatePermission = computed(() => hasPermission('system:permission:create'));
+const canUpdatePermission = computed(() => hasPermission('system:permission:update'));
+const canDeletePermission = computed(() => hasPermission('system:permission:delete'));
+const canOperatePermission = computed(() =>
+  hasAnyPermission(['system:permission:update', 'system:permission:delete']),
+);
+const canSubmitPermission = computed(() =>
+  formMode.value === 'create' ? canCreatePermission.value : canUpdatePermission.value,
+);
 const resourceLabel = computed(() => (permissionForm.permissionType === 'api' ? '资源路径' : '资源标识'));
 const resourcePlaceholder = computed(() =>
   permissionForm.permissionType === 'api' ? '例如 /api/v1/system/roles' : '例如 system:role:export',
@@ -358,7 +369,7 @@ onMounted(loadPageData);
       </div>
       <div class="permission-actions">
         <el-button @click="loadPageData">刷新</el-button>
-        <el-button type="primary" @click="openCreatePermission">新增权限</el-button>
+        <el-button v-if="canCreatePermission" type="primary" @click="openCreatePermission">新增权限</el-button>
       </div>
     </div>
 
@@ -431,10 +442,12 @@ onMounted(loadPageData);
       </el-table-column>
       <el-table-column prop="sortOrder" label="排序" width="80" />
       <el-table-column prop="remark" label="备注" min-width="220" show-overflow-tooltip />
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column v-if="canOperatePermission" label="操作" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openEditPermission(row)">编辑</el-button>
-          <el-button link type="danger" :disabled="row.preset" @click="deletePermission(row)">删除</el-button>
+          <el-button v-if="canUpdatePermission" link type="primary" @click="openEditPermission(row)">编辑</el-button>
+          <el-button v-if="canDeletePermission" link type="danger" :disabled="row.preset" @click="deletePermission(row)">
+            删除
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -451,7 +464,7 @@ onMounted(loadPageData);
       />
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="840px" class="permission-edit-dialog">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="840px" align-center class="permission-edit-dialog">
       <el-form :model="permissionForm" label-position="top" class="permission-form">
         <section class="permission-form__section">
           <h3 class="permission-form__section-title">基础信息</h3>
@@ -550,7 +563,7 @@ onMounted(loadPageData);
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitPermission">保存</el-button>
+        <el-button v-if="canSubmitPermission" type="primary" :loading="saving" @click="submitPermission">保存</el-button>
       </template>
     </el-dialog>
   </section>

@@ -2,6 +2,8 @@
 import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthSession } from '@/auth/auth-session';
+import { writeSsoRedirectPath } from '@/auth/auth-storage';
+import { authApi } from '@/api';
 import { findFirstAuthorizedMenuPath, isAuthorizedMenuRoute } from '@/router/menu-permissions';
 import { getErrorMessage } from '@/utils/api-feedback';
 
@@ -30,6 +32,15 @@ function resolveRedirectPath(): string {
   return findFirstAuthorizedMenuPath(state.menus) ?? '/no-permission';
 }
 
+function resolvePendingRedirectPath(): string {
+  const redirect = route.query.redirect;
+  if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('/login')) {
+    // SSO 发起时用户尚未加载菜单，先只做站内路径校验，回调成功后再按菜单权限二次校验。
+    return redirect;
+  }
+  return '/';
+}
+
 async function handleSubmit(): Promise<void> {
   submitError.value = '';
   try {
@@ -38,6 +49,17 @@ async function handleSubmit(): Promise<void> {
       password: form.password,
     });
     await router.replace(resolveRedirectPath());
+  } catch (error) {
+    submitError.value = getErrorMessage(error);
+  }
+}
+
+async function handleSsoLogin(): Promise<void> {
+  submitError.value = '';
+  try {
+    writeSsoRedirectPath(resolvePendingRedirectPath());
+    const result = await authApi.getSsoLoginUrl();
+    window.location.href = result.loginUrl;
   } catch (error) {
     submitError.value = getErrorMessage(error);
   }
@@ -76,6 +98,10 @@ async function handleSubmit(): Promise<void> {
 
         <button class="button button--primary login-card__submit" type="submit" :disabled="state.submitting">
           {{ state.submitting ? '登录中...' : '进入系统' }}
+        </button>
+
+        <button class="button login-card__submit" type="button" :disabled="state.submitting" @click="handleSsoLogin">
+          单点登录
         </button>
       </form>
 

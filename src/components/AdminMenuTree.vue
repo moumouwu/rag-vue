@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
+import MenuIcon from '@/components/MenuIcon.vue';
 import type { AuthorizedMenuNode } from '@/router/menu-permissions';
 import { normalizeRoutePath } from '@/router/menu-permissions';
 
@@ -98,10 +99,12 @@ const visibleMenus = computed(() => props.menus.filter(isVisibleMenu));
           active-class="admin-menu-tree__link--active"
           :to="normalizeRoutePath(menu.routePath)"
         >
-          {{ menu.menuName }}
+          <MenuIcon :icon="menu.icon" :fallback-label="menu.menuName" size="small" />
+          <span class="admin-menu-tree__text">{{ menu.menuName }}</span>
         </RouterLink>
         <button v-else class="admin-menu-tree__label" type="button" @click="toggleMenu(menu)">
-          {{ menu.menuName }}
+          <MenuIcon :icon="menu.icon" :fallback-label="menu.menuName" size="small" />
+          <span class="admin-menu-tree__text">{{ menu.menuName }}</span>
         </button>
       </div>
 

@@ -1,6 +1,6 @@
 import { computed, reactive, readonly } from 'vue';
 import { authApi, systemApi } from '@/api';
-import type { CurrentUserInfo, LoginCommand, LoginResult, SystemMenuNode } from '@/types';
+import type { CurrentUserInfo, LoginCommand, LoginResult, SsoCallbackCommand, SystemMenuNode } from '@/types';
 import { clearAccessToken, readAccessToken, writeAccessToken } from './auth-storage';
 
 interface AuthState {
@@ -51,12 +51,7 @@ async function login(command: LoginCommand): Promise<LoginResult> {
   state.submitting = true;
   try {
     const result = await authApi.login(command);
-    writeAccessToken(result.accessToken);
-    state.accessToken = result.accessToken;
-    state.currentUser = result.userInfo;
-    // 登录后立即加载菜单，路由守卫和左侧导航都依赖这份动态授权数据。
-    state.menus = await systemApi.getCurrentUserMenus();
-    state.initialized = true;
+    await applyLoginResult(result);
     return result;
   } catch (error) {
     resetSession();
@@ -66,12 +61,40 @@ async function login(command: LoginCommand): Promise<LoginResult> {
   }
 }
 
+async function loginBySsoCallback(command: SsoCallbackCommand): Promise<LoginResult> {
+  state.submitting = true;
+  try {
+    const result = await authApi.ssoCallback(command);
+    await applyLoginResult(result);
+    return result;
+  } catch (error) {
+    resetSession();
+    throw error;
+  } finally {
+    state.submitting = false;
+  }
+}
+
+async function applyLoginResult(result: LoginResult): Promise<void> {
+  writeAccessToken(result.accessToken);
+  state.accessToken = result.accessToken;
+  state.currentUser = result.userInfo;
+  // 登录后立即加载菜单，路由守卫、左侧导航和按钮权限都依赖这份动态授权数据。
+  state.menus = await systemApi.getCurrentUserMenus();
+  state.initialized = true;
+}
+
 async function refreshCurrentUserMenus(): Promise<void> {
   if (!state.accessToken || !state.currentUser) {
     return;
   }
-  // 角色授权变更后刷新当前菜单，避免页面继续显示旧授权结果。
-  state.menus = await systemApi.getCurrentUserMenus();
+  // 角色授权变更后同时刷新用户权限码和菜单，避免按钮与导航继续显示旧授权结果。
+  const [userInfo, menus] = await Promise.all([
+    authApi.getCurrentUser(),
+    systemApi.getCurrentUserMenus(),
+  ]);
+  state.currentUser = userInfo;
+  state.menus = menus;
 }
 
 async function logout(): Promise<void> {
@@ -98,6 +121,7 @@ export function useAuthSession() {
     initializeSession,
     refreshCurrentUserMenus,
     login,
+    loginBySsoCallback,
     logout,
     resetSession,
     isAuthenticated: computed(() => Boolean(state.accessToken && state.currentUser)),

@@ -225,6 +225,19 @@ export const apiRequest = {
       body,
     });
   },
+  // 局部状态动作使用 PATCH，避免页面为启停、默认标记提交完整表单。
+  patch<TData, TBody = unknown>(
+    url: string,
+    body?: TBody,
+    options?: Omit<ApiRequestOptions<TBody>, 'method' | 'url' | 'body'>,
+  ): Promise<TData> {
+    return request<TData, TBody>({
+      ...(options ?? {}),
+      method: 'PATCH',
+      url,
+      body,
+    });
+  },
   // 删除请求只表达删除意图，是否逻辑删除由后端统一控制。
   delete<TData>(url: string, options?: Omit<ApiRequestOptions<never>, 'method' | 'url' | 'body'>): Promise<TData> {
     return request<TData>({

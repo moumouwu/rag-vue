@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthSession } from '@/auth/auth-session';
 import AdminLayout from '@/views/AdminLayout.vue';
+import ModelConfigView from '@/views/ai/ModelConfigView.vue';
 import ChatWorkbenchView from '@/views/ChatWorkbenchView.vue';
 import LoginView from '@/views/LoginView.vue';
 import DictListView from '@/views/system/DictListView.vue';
@@ -73,7 +74,7 @@ const placeholderRoutes: RouteRecordRaw[] = [
   {
     path: 'ai/models',
     name: 'AiModel',
-    component: PlaceholderView,
+    component: ModelConfigView,
     meta: { title: '模型配置', menuCode: 'ai.model' },
   },
   { path: 'files', name: 'File', component: PlaceholderView, meta: { title: '文件管理', menuCode: 'file' } },

@@ -46,19 +46,8 @@ import type {
   SystemRoleUpdatePayload,
   EntityId,
 } from '@/types';
+import { buildQueryUrl } from '../query';
 import { apiRequest } from '../request';
-
-function buildQueryUrl(path: string, params: Record<string, string | number | null | undefined>): string {
-  const searchParams = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    // 过滤空参数，避免后端把空字符串误判为有效筛选条件。
-    if (value !== undefined && value !== null && String(value).trim() !== '') {
-      searchParams.set(key, String(value).trim());
-    }
-  });
-  const queryString = searchParams.toString();
-  return queryString ? `${path}?${queryString}` : path;
-}
 
 export const systemApi = {
   // 当前用户菜单用于动态路由、左侧菜单和页签权限判断。

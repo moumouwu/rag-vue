@@ -12,19 +12,8 @@ import type {
   EntityId,
   PageData,
 } from '@/types';
+import { buildQueryUrl } from '../query';
 import { apiRequest } from '../request';
-
-function buildQueryUrl(path: string, params: Record<string, string | number | null | undefined>): string {
-  const searchParams = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    // 过滤空筛选值，避免后端把空字符串当成模型类型或状态做字典校验。
-    if (value !== undefined && value !== null && String(value).trim() !== '') {
-      searchParams.set(key, String(value).trim());
-    }
-  });
-  const queryString = searchParams.toString();
-  return queryString ? `${path}?${queryString}` : path;
-}
 
 export const aiApi = {
   // 模型配置列表用于后台维护和后续路由排查，只返回脱敏后的凭据状态。

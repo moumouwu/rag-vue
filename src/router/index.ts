@@ -3,6 +3,7 @@ import { useAuthSession } from '@/auth/auth-session';
 import AdminLayout from '@/views/AdminLayout.vue';
 import ModelConfigView from '@/views/ai/ModelConfigView.vue';
 import ChatWorkbenchView from '@/views/ChatWorkbenchView.vue';
+import FileManagerView from '@/views/file/FileManagerView.vue';
 import LoginView from '@/views/LoginView.vue';
 import DictListView from '@/views/system/DictListView.vue';
 import DeptListView from '@/views/system/DeptListView.vue';
@@ -81,7 +82,7 @@ const placeholderRoutes: RouteRecordRaw[] = [
   {
     path: 'files/manager',
     name: 'FileManager',
-    component: PlaceholderView,
+    component: FileManagerView,
     meta: { title: '文件管理', menuCode: 'file.manager' },
   },
   {

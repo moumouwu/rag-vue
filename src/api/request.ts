@@ -117,6 +117,10 @@ function normalizeErrorPayload(payload: unknown, fallbackMessage: string, status
   };
 }
 
+function isFormDataBody(body: unknown): body is FormData {
+  return typeof FormData !== 'undefined' && body instanceof FormData;
+}
+
 function buildHeaders(body: unknown, headers?: Record<string, string>, skipAuth?: boolean): Headers {
   const mergedHeaders = new Headers(clientConfig.defaultHeaders ?? {});
   mergedHeaders.set('Accept', 'application/json');
@@ -130,7 +134,7 @@ function buildHeaders(body: unknown, headers?: Record<string, string>, skipAuth?
     mergedHeaders.set('Authorization', `Bearer ${accessToken}`);
   }
 
-  if (body !== undefined && !mergedHeaders.has('Content-Type')) {
+  if (body !== undefined && !isFormDataBody(body) && !mergedHeaders.has('Content-Type')) {
     mergedHeaders.set('Content-Type', 'application/json');
   }
 
@@ -163,7 +167,12 @@ export async function request<TData, TBody = unknown>(options: ApiRequestOptions
     response = await fetcher(joinUrl(clientConfig.baseUrl ?? '', options.url), {
       method: options.method,
       headers: buildHeaders(options.body, options.headers, options.skipAuth),
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      // FormData 必须交给浏览器生成 multipart boundary，不能走 JSON 序列化或手动设置 Content-Type。
+      body: options.body === undefined
+        ? undefined
+        : isFormDataBody(options.body)
+          ? options.body
+          : JSON.stringify(options.body),
       signal: options.signal,
     });
   } catch (error) {
@@ -188,6 +197,36 @@ export async function request<TData, TBody = unknown>(options: ApiRequestOptions
   }
 
   return payload.data;
+}
+
+// 文件内容请求不走 JSON 包裹响应，但仍复用 Token、403 跳转和错误归一化。
+export async function requestBlob(url: string, options?: Omit<ApiRequestOptions<never>, 'method' | 'url' | 'body'>): Promise<Blob> {
+  const fetcher = clientConfig.fetcher;
+  if (!fetcher) {
+    throw new Error('当前环境不支持 fetch，请在初始化时注入 fetcher');
+  }
+  let response: Response;
+  try {
+    response = await fetcher(joinUrl(clientConfig.baseUrl ?? '', url), {
+      method: 'GET',
+      headers: buildHeaders(undefined, options?.headers, options?.skipAuth),
+      signal: options?.signal,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '网络请求失败';
+    throw new ApiRequestError(normalizeErrorPayload(null, message));
+  }
+  if (!response.ok) {
+    const payload = await parseJsonSafely(response);
+    if (response.status === 403 && !options?.suppressForbiddenRedirect) {
+      clientConfig.onForbidden?.();
+    }
+    throw new ApiRequestError(
+      normalizeErrorPayload(payload, `请求失败，HTTP 状态码 ${response.status}`, response.status),
+      response.status,
+    );
+  }
+  return response.blob();
 }
 
 export const apiRequest = {
@@ -245,5 +284,18 @@ export const apiRequest = {
       method: 'DELETE',
       url,
     });
+  },
+  // 文件上传统一使用 FormData，保留鉴权与错误归一化，但跳过 JSON 请求体处理。
+  upload<TData>(url: string, body: FormData, options?: Omit<ApiRequestOptions<FormData>, 'method' | 'url' | 'body'>): Promise<TData> {
+    return request<TData, FormData>({
+      ...(options ?? {}),
+      method: 'POST',
+      url,
+      body,
+    });
+  },
+  // 文件预览和下载返回二进制内容，但仍需要统一附加 Token 并处理 403。
+  download(url: string, options?: Omit<ApiRequestOptions<never>, 'method' | 'url' | 'body'>): Promise<Blob> {
+    return requestBlob(url, options);
   },
 };

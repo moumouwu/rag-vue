@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { usePermission } from '@/auth/permissions';
 import { aiApi } from '@/api/modules/ai';
 import { knowledgeApi } from '@/api/modules/knowledge';
@@ -27,6 +28,8 @@ interface KnowledgeBaseFormState {
   ownerDeptId: string;
   ownerUserId: string;
   baseStatus: KnowledgeBaseStatus;
+  displayEnabled: boolean;
+  displayOrder: number;
   languageModelId: string;
   vectorModelId: string;
   rerankModelId: string;
@@ -34,6 +37,7 @@ interface KnowledgeBaseFormState {
 }
 
 const bases = ref<KnowledgeBase[]>([]);
+const router = useRouter();
 const modelOptions = ref<AiModelConfig[]>([]);
 const deptOptions = ref<SystemDept[]>([]);
 const userOptions = ref<SystemUser[]>([]);
@@ -47,7 +51,9 @@ const editingBaseId = ref<EntityId | null>(null);
 const detailBase = ref<KnowledgeBase | null>(null);
 const keyword = ref('');
 const ownerDeptIdFilter = ref('');
+const ownerUserIdFilter = ref('');
 const baseStatusFilter = ref<KnowledgeBaseStatus | ''>('');
+const displayEnabledFilter = ref<boolean | ''>('');
 const pageNo = ref(1);
 const pageSize = ref(10);
 const total = ref(0);
@@ -60,6 +66,8 @@ const form = reactive<KnowledgeBaseFormState>({
   ownerDeptId: '',
   ownerUserId: '',
   baseStatus: 'enabled',
+  displayEnabled: true,
+  displayOrder: 100,
   languageModelId: '',
   vectorModelId: '',
   rerankModelId: '',
@@ -73,9 +81,16 @@ const canCreateBase = computed(() => hasPermission('knowledge:base:create'));
 const canUpdateBase = computed(() => hasPermission('knowledge:base:update'));
 const canUpdateStatus = computed(() => hasPermission('knowledge:base:status'));
 const canDeleteBase = computed(() => hasPermission('knowledge:base:delete'));
+const canQueryDocument = computed(() => hasPermission('knowledge:document:query'));
 const canSubmitBase = computed(() => (formMode.value === 'create' ? canCreateBase.value : canUpdateBase.value));
 const canOperateBase = computed(() =>
-  hasAnyPermission(['knowledge:base:detail', 'knowledge:base:update', 'knowledge:base:status', 'knowledge:base:delete']),
+  hasAnyPermission([
+    'knowledge:base:detail',
+    'knowledge:base:update',
+    'knowledge:base:status',
+    'knowledge:base:delete',
+    'knowledge:document:query',
+  ]),
 );
 const enabledCount = computed(() => bases.value.filter((item) => item.baseStatus === 'enabled').length);
 const hasDeptOptions = computed(() => deptOptions.value.length > 0);
@@ -94,6 +109,10 @@ function statusText(status: KnowledgeBaseStatus): string {
 
 function statusTagType(status: KnowledgeBaseStatus): 'success' | 'danger' {
   return status === 'enabled' ? 'success' : 'danger';
+}
+
+function displayEnabledText(displayEnabled: boolean): string {
+  return displayEnabled ? '展示' : '隐藏';
 }
 
 function safeText(value: string | null | undefined, fallback = '未设置'): string {
@@ -119,6 +138,8 @@ function resetForm(): void {
   form.ownerDeptId = '';
   form.ownerUserId = '';
   form.baseStatus = 'enabled';
+  form.displayEnabled = true;
+  form.displayOrder = 100;
   form.languageModelId = '';
   form.vectorModelId = '';
   form.rerankModelId = '';
@@ -132,6 +153,8 @@ function fillForm(base: KnowledgeBase): void {
   form.ownerDeptId = String(base.ownerDeptId ?? '');
   form.ownerUserId = base.ownerUserId ? String(base.ownerUserId) : '';
   form.baseStatus = base.baseStatus;
+  form.displayEnabled = base.displayEnabled;
+  form.displayOrder = base.displayOrder ?? 100;
   form.languageModelId = base.languageModelId ? String(base.languageModelId) : '';
   form.vectorModelId = base.vectorModelId ? String(base.vectorModelId) : '';
   form.rerankModelId = base.rerankModelId ? String(base.rerankModelId) : '';
@@ -158,6 +181,8 @@ function buildPayload(): KnowledgeBaseCreatePayload | KnowledgeBaseUpdatePayload
     ownerDeptId: normalizeOptionalId(form.ownerDeptId),
     ownerUserId: normalizeOptionalId(form.ownerUserId),
     baseStatus: form.baseStatus,
+    displayEnabled: form.displayEnabled,
+    displayOrder: form.displayOrder,
     languageModelId: normalizeOptionalId(form.languageModelId),
     vectorModelId: normalizeOptionalId(form.vectorModelId),
     rerankModelId: normalizeOptionalId(form.rerankModelId),
@@ -187,7 +212,9 @@ async function loadKnowledgeBases(): Promise<void> {
       pageSize: pageSize.value,
       keyword: keyword.value.trim(),
       ownerDeptId: ownerDeptIdFilter.value.trim(),
+      ownerUserId: ownerUserIdFilter.value.trim(),
       baseStatus: baseStatusFilter.value,
+      displayEnabled: displayEnabledFilter.value,
     });
     if (pageData.list.length === 0 && pageData.total > 0 && pageNo.value > 1) {
       // 删除或筛选后当前页可能为空，回退到最后一页避免停留在空表。
@@ -352,6 +379,13 @@ async function deleteBase(base: KnowledgeBase): Promise<void> {
   }
 }
 
+function openDocumentManagement(base: KnowledgeBase): void {
+  router.push({
+    name: 'KnowledgeDocument',
+    query: { baseId: String(base.knowledgeBaseId), baseName: base.baseName },
+  });
+}
+
 onMounted(async () => {
   await Promise.all([loadKnowledgeBases(), loadAuxiliaryOptions()]);
 });
@@ -377,10 +411,30 @@ onMounted(async () => {
         <el-option v-for="dept in deptOptions" :key="dept.deptId" :label="dept.deptName" :value="String(dept.deptId)" />
       </el-select>
       <el-input v-else v-model="ownerDeptIdFilter" clearable placeholder="所属部门ID" />
+      <el-select
+        v-if="hasUserOptions"
+        v-model="ownerUserIdFilter"
+        placeholder="全部负责人"
+        clearable
+        filterable
+      >
+        <el-option label="全部负责人" value="" />
+        <el-option
+          v-for="user in userOptions"
+          :key="user.userId"
+          :label="`${user.displayName}（${user.username}）`"
+          :value="String(user.userId)"
+        />
+      </el-select>
       <el-select v-model="baseStatusFilter" placeholder="全部状态" clearable>
         <el-option label="全部状态" value="" />
         <el-option label="启用" value="enabled" />
         <el-option label="停用" value="disabled" />
+      </el-select>
+      <el-select v-model="displayEnabledFilter" placeholder="全部展示" clearable>
+        <el-option label="全部展示" value="" />
+        <el-option label="展示" :value="true" />
+        <el-option label="隐藏" :value="false" />
       </el-select>
       <el-button type="primary" :disabled="!canQueryBase" @click="searchKnowledgeBases">查询</el-button>
     </div>
@@ -408,6 +462,17 @@ onMounted(async () => {
         <el-table-column label="负责人" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ safeText(row.ownerUserName) }}</template>
         </el-table-column>
+        <el-table-column label="展示" width="86">
+          <template #default="{ row }">
+            <el-tag :type="row.displayEnabled ? 'success' : 'info'" size="small">
+              {{ displayEnabledText(row.displayEnabled) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="displayOrder" label="排序" width="82" />
+        <el-table-column label="文档数" width="104">
+          <template #default="{ row }">{{ row.visibleDocumentCount }} / {{ row.documentCount }}</template>
+        </el-table-column>
         <el-table-column label="语言模型" min-width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ safeText(row.languageModelName) }}</template>
         </el-table-column>
@@ -420,9 +485,10 @@ onMounted(async () => {
         <el-table-column label="摘要" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">{{ safeText(row.displaySummary || row.description) }}</template>
         </el-table-column>
-        <el-table-column v-if="canOperateBase" label="操作" width="214" fixed="right">
+        <el-table-column v-if="canOperateBase" label="操作" width="256" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canViewBase" link type="primary" @click="openDetailBase(row)">详情</el-button>
+            <el-button v-if="canQueryDocument" link type="primary" @click="openDocumentManagement(row)">文档</el-button>
             <el-button v-if="canUpdateBase" link type="primary" @click="openEditBase(row)">编辑</el-button>
             <el-button v-if="canUpdateStatus" link type="primary" @click="changeBaseStatus(row)">
               {{ row.baseStatus === 'enabled' ? '停用' : '启用' }}
@@ -495,6 +561,18 @@ onMounted(async () => {
               <el-radio-button label="disabled">停用</el-radio-button>
             </el-radio-group>
           </el-form-item>
+          <el-form-item label="入口展示">
+            <el-switch v-model="form.displayEnabled" active-text="展示" inactive-text="隐藏" />
+          </el-form-item>
+          <el-form-item label="展示排序">
+            <el-input-number
+              v-model="form.displayOrder"
+              :min="0"
+              :max="999999"
+              controls-position="right"
+              placeholder="数值越小越靠前"
+            />
+          </el-form-item>
           <el-form-item label="语言模型">
             <el-select v-if="languageModelOptions.length > 0" v-model="form.languageModelId" clearable filterable>
               <el-option
@@ -549,6 +627,11 @@ onMounted(async () => {
         <el-descriptions-item label="状态">{{ statusText(detailBase.baseStatus) }}</el-descriptions-item>
         <el-descriptions-item label="所属部门">{{ ownerDeptText(detailBase) }}</el-descriptions-item>
         <el-descriptions-item label="负责人">{{ safeText(detailBase.ownerUserName) }}</el-descriptions-item>
+        <el-descriptions-item label="入口展示">{{ displayEnabledText(detailBase.displayEnabled) }}</el-descriptions-item>
+        <el-descriptions-item label="展示排序">{{ detailBase.displayOrder }}</el-descriptions-item>
+        <el-descriptions-item label="可见/总文档数">
+          {{ detailBase.visibleDocumentCount }} / {{ detailBase.documentCount }}
+        </el-descriptions-item>
         <el-descriptions-item label="语言模型">{{ safeText(detailBase.languageModelName) }}</el-descriptions-item>
         <el-descriptions-item label="向量模型">{{ safeText(detailBase.vectorModelName) }}</el-descriptions-item>
         <el-descriptions-item label="重排模型">{{ safeText(detailBase.rerankModelName) }}</el-descriptions-item>
@@ -556,6 +639,7 @@ onMounted(async () => {
         <el-descriptions-item label="描述" :span="2">{{ safeText(detailBase.description) }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
+
   </section>
 </template>
 
@@ -578,6 +662,10 @@ onMounted(async () => {
 
 .knowledge-toolbar .el-select {
   width: 150px;
+}
+
+.knowledge-form :deep(.el-input-number) {
+  width: 100%;
 }
 
 .knowledge-summary {

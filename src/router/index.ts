@@ -5,6 +5,7 @@ import ModelConfigView from '@/views/ai/ModelConfigView.vue';
 import ChatWorkbenchView from '@/views/ChatWorkbenchView.vue';
 import FileManagerView from '@/views/file/FileManagerView.vue';
 import KnowledgeBaseListView from '@/views/knowledge/KnowledgeBaseListView.vue';
+import KnowledgeDocumentManagementView from '@/components/KnowledgeDocumentManagementDialog.vue';
 import LoginView from '@/views/LoginView.vue';
 import DictListView from '@/views/system/DictListView.vue';
 import DeptListView from '@/views/system/DeptListView.vue';
@@ -97,6 +98,12 @@ const placeholderRoutes: RouteRecordRaw[] = [
     name: 'KnowledgeLibrary',
     component: KnowledgeBaseListView,
     meta: { title: '知识库管理', menuCode: 'knowledge.library' },
+  },
+  {
+    path: 'knowledge/documents',
+    name: 'KnowledgeDocument',
+    component: KnowledgeDocumentManagementView,
+    meta: { title: '文档管理', menuCode: 'knowledge.library' },
   },
 ];
 

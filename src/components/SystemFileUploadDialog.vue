@@ -35,12 +35,14 @@ const props = withDefaults(defineProps<{
   defaultSourceBizName?: string;
   showSourceAdvanced?: boolean;
   sourceModuleOptions?: SourceModuleOption[];
+  appendToBody?: boolean;
 }>(), {
   defaultSourceModule: 'system_file',
   defaultSourceBizType: '',
   defaultSourceBizId: null,
   defaultSourceBizName: '',
   showSourceAdvanced: false,
+  appendToBody: false,
 });
 
 const emit = defineEmits<{
@@ -142,7 +144,14 @@ watch(() => props.modelValue, (visible) => {
 </script>
 
 <template>
-  <el-dialog v-model="dialogVisible" title="上传文件" width="760px" align-center>
+  <el-dialog
+    v-model="dialogVisible"
+    title="上传文件"
+    width="760px"
+    align-center
+    :append-to-body="props.appendToBody"
+    :z-index="3200"
+  >
     <el-form label-position="top" class="file-upload-form">
       <el-form-item label="选择文件" required>
         <el-upload

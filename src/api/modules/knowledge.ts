@@ -1,10 +1,13 @@
 import type {
   EntityId,
   KnowledgeBase,
+  KnowledgeBaseChunkStrategy,
+  KnowledgeBaseChunkStrategyPayload,
   KnowledgeBaseCreatePayload,
   KnowledgeBaseQuery,
   KnowledgeBaseStatusUpdatePayload,
   KnowledgeBaseUpdatePayload,
+  KnowledgeChunkStrategyOption,
   KnowledgeDocument,
   KnowledgeDocumentBusinessStatusUpdatePayload,
   KnowledgeDocumentCreatePayload,
@@ -57,6 +60,29 @@ export const knowledgeApi = {
   // 删除知识库走后端依赖校验；有关联未删除文档时后端会明确拒绝。
   deleteKnowledgeBase(baseId: EntityId): Promise<void> {
     return apiRequest.delete<void>(`/api/v1/knowledge/bases/${baseId}`);
+  },
+
+  // 策略选项由后端返回可保存和可执行状态，前端不能自行推断哪些策略已接入处理链路。
+  listKnowledgeChunkStrategies(includeInherit = false): Promise<KnowledgeChunkStrategyOption[]> {
+    return apiRequest.get<KnowledgeChunkStrategyOption[]>(buildQueryUrl('/api/v1/knowledge/chunk-strategies', {
+      includeInherit,
+    }));
+  },
+
+  // 查询知识库默认分块策略时同时回显系统默认和最终生效配置，避免继承口径只在前端猜测。
+  getKnowledgeBaseChunkStrategy(baseId: EntityId): Promise<KnowledgeBaseChunkStrategy> {
+    return apiRequest.get<KnowledgeBaseChunkStrategy>(`/api/v1/knowledge/bases/${baseId}/chunk-strategy`);
+  },
+
+  // 保存知识库默认策略只影响后续处理输入，后端不会自动改写历史处理版本。
+  saveKnowledgeBaseChunkStrategy(
+    baseId: EntityId,
+    payload: KnowledgeBaseChunkStrategyPayload,
+  ): Promise<KnowledgeBaseChunkStrategy> {
+    return apiRequest.put<KnowledgeBaseChunkStrategy, KnowledgeBaseChunkStrategyPayload>(
+      `/api/v1/knowledge/bases/${baseId}/chunk-strategy`,
+      payload,
+    );
   },
 
   // 文档列表按后端文档权限策略过滤，列表响应不包含正文快照，避免大字段拖慢页面。

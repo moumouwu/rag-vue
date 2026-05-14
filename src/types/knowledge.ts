@@ -3,6 +3,8 @@ import type { PageRequest } from './common';
 import type { EntityId, SystemDept, SystemRole, SystemUser } from './system';
 
 export type KnowledgeBaseStatus = 'enabled' | 'disabled';
+export type KnowledgeChunkStrategyType = 'inherit' | 'fixed_overlap' | 'recursive' | 'semantic' | 'hybrid';
+export type KnowledgeChunkConfig = Record<string, unknown>;
 export type KnowledgeDocumentPermissionStrategy = 'inherit_knowledge_base' | 'custom' | 'public' | 'creator_only';
 export type KnowledgeDocumentSourceType = 'text_input' | 'uploaded_file' | 'external_link';
 export type KnowledgeDocumentBusinessStatus = 'draft' | 'published' | 'offline' | 'archived';
@@ -27,6 +29,8 @@ export interface KnowledgeBase {
   rerankModelId: EntityId | null;
   rerankModelName: string | null;
   displaySummary: string;
+  chunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'> | null;
+  chunkConfigJson: string | null;
   documentCount: number;
   visibleDocumentCount: number;
   createdBy: EntityId | null;
@@ -64,6 +68,33 @@ export type KnowledgeBaseUpdatePayload = Omit<KnowledgeBaseCreatePayload, 'baseC
 
 export interface KnowledgeBaseStatusUpdatePayload {
   baseStatus: KnowledgeBaseStatus;
+}
+
+export interface KnowledgeChunkStrategyOption {
+  strategyType: KnowledgeChunkStrategyType;
+  strategyName: string;
+  description: string;
+  enabled: boolean;
+  executable: boolean;
+  disabledReason: string;
+  defaultConfig: KnowledgeChunkConfig;
+  configSchema: KnowledgeChunkConfig;
+}
+
+export interface KnowledgeBaseChunkStrategy {
+  knowledgeBaseId: EntityId;
+  chunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'> | null;
+  chunkConfig: KnowledgeChunkConfig | null;
+  systemDefaultChunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'>;
+  systemDefaultChunkConfig: KnowledgeChunkConfig;
+  resolvedChunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'>;
+  resolvedChunkConfig: KnowledgeChunkConfig;
+  strategyOptions: KnowledgeChunkStrategyOption[];
+}
+
+export interface KnowledgeBaseChunkStrategyPayload {
+  chunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'>;
+  chunkConfig: KnowledgeChunkConfig;
 }
 
 export interface KnowledgeBaseModelOption {
@@ -118,8 +149,11 @@ export interface KnowledgeDocument {
   businessVersion: number;
   latestProcessingVersion: number;
   activeProcessingVersion: number;
-  chunkStrategyType: string;
+  chunkStrategyType: KnowledgeChunkStrategyType;
   chunkConfigJson: string | null;
+  chunkConfig?: KnowledgeChunkConfig | null;
+  resolvedChunkStrategyType?: Exclude<KnowledgeChunkStrategyType, 'inherit'>;
+  resolvedChunkConfig?: KnowledgeChunkConfig;
   publishedAt: string | null;
   offlineAt: string | null;
   remark: string;
@@ -152,6 +186,8 @@ export interface KnowledgeDocumentCreatePayload {
   categoryName: string;
   tags: string[];
   ownerDeptId?: EntityId | null;
+  chunkStrategyType?: KnowledgeChunkStrategyType;
+  chunkConfig?: KnowledgeChunkConfig | null;
   businessStatus?: KnowledgeDocumentBusinessStatus;
   remark: string;
 }

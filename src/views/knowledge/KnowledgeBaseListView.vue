@@ -11,9 +11,14 @@ import type {
   AiModelType,
   EntityId,
   KnowledgeBase,
+  KnowledgeBaseChunkStrategy,
+  KnowledgeBaseChunkStrategyPayload,
   KnowledgeBaseCreatePayload,
   KnowledgeBaseStatus,
   KnowledgeBaseUpdatePayload,
+  KnowledgeChunkConfig,
+  KnowledgeChunkStrategyOption,
+  KnowledgeChunkStrategyType,
   SystemDept,
   SystemUser,
 } from '@/types';
@@ -36,6 +41,18 @@ interface KnowledgeBaseFormState {
   displaySummary: string;
 }
 
+interface ChunkStrategyFormState {
+  chunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'>;
+  chunkSize: number;
+  overlapSize: number;
+  minChunkSize: number;
+  separators: string;
+  targetChunkSize: number;
+  maxChunkSize: number;
+  similarityThreshold: number;
+  windowSize: number;
+}
+
 const bases = ref<KnowledgeBase[]>([]);
 const router = useRouter();
 const modelOptions = ref<AiModelConfig[]>([]);
@@ -45,10 +62,14 @@ const loading = ref(false);
 const saving = ref(false);
 const dialogVisible = ref(false);
 const detailDialogVisible = ref(false);
+const strategyDialogVisible = ref(false);
 const detailLoading = ref(false);
+const strategyLoading = ref(false);
 const formMode = ref<FormMode>('create');
 const editingBaseId = ref<EntityId | null>(null);
 const detailBase = ref<KnowledgeBase | null>(null);
+const strategyBase = ref<KnowledgeBase | null>(null);
+const strategyOptions = ref<KnowledgeChunkStrategyOption[]>([]);
 const keyword = ref('');
 const ownerDeptIdFilter = ref('');
 const ownerUserIdFilter = ref('');
@@ -74,6 +95,18 @@ const form = reactive<KnowledgeBaseFormState>({
   displaySummary: '',
 });
 
+const strategyForm = reactive<ChunkStrategyFormState>({
+  chunkStrategyType: 'fixed_overlap',
+  chunkSize: 1000,
+  overlapSize: 200,
+  minChunkSize: 100,
+  separators: '\\n# ,\\n## ,\\n### ,\\n\\n,\\n,。,；,，',
+  targetChunkSize: 1000,
+  maxChunkSize: 2000,
+  similarityThreshold: 0.72,
+  windowSize: 3,
+});
+
 const dialogTitle = computed(() => (formMode.value === 'create' ? '新增知识库' : '编辑知识库'));
 const canQueryBase = computed(() => hasPermission('knowledge:base:query'));
 const canViewBase = computed(() => hasPermission('knowledge:base:detail'));
@@ -82,6 +115,9 @@ const canUpdateBase = computed(() => hasPermission('knowledge:base:update'));
 const canUpdateStatus = computed(() => hasPermission('knowledge:base:status'));
 const canDeleteBase = computed(() => hasPermission('knowledge:base:delete'));
 const canQueryDocument = computed(() => hasPermission('knowledge:document:query'));
+const canQueryChunkStrategy = computed(() => hasPermission('knowledge:chunk-strategy:query'));
+const canViewChunkStrategy = computed(() => hasPermission('knowledge:base:chunk-strategy-detail'));
+const canSaveChunkStrategy = computed(() => hasPermission('knowledge:base:chunk-strategy-save'));
 const canSubmitBase = computed(() => (formMode.value === 'create' ? canCreateBase.value : canUpdateBase.value));
 const canOperateBase = computed(() =>
   hasAnyPermission([
@@ -90,6 +126,7 @@ const canOperateBase = computed(() =>
     'knowledge:base:status',
     'knowledge:base:delete',
     'knowledge:document:query',
+    'knowledge:base:chunk-strategy-detail',
   ]),
 );
 const enabledCount = computed(() => bases.value.filter((item) => item.baseStatus === 'enabled').length);
@@ -98,6 +135,12 @@ const hasUserOptions = computed(() => userOptions.value.length > 0);
 const languageModelOptions = computed(() => filterModelOptions('language_model'));
 const vectorModelOptions = computed(() => filterModelOptions('vector_model'));
 const rerankModelOptions = computed(() => filterModelOptions('rerank_model'));
+const concreteStrategyOptions = computed(() =>
+  strategyOptions.value.filter((option) => option.strategyType !== 'inherit' && option.enabled),
+);
+const selectedStrategyOption = computed(() =>
+  strategyOptions.value.find((option) => option.strategyType === strategyForm.chunkStrategyType),
+);
 
 function resolveErrorMessage(error: unknown, fallback: string): string {
   return isApiRequestError(error) ? error.message : fallback;
@@ -113,6 +156,17 @@ function statusTagType(status: KnowledgeBaseStatus): 'success' | 'danger' {
 
 function displayEnabledText(displayEnabled: boolean): string {
   return displayEnabled ? '展示' : '隐藏';
+}
+
+function chunkStrategyText(strategyType: string | null | undefined): string {
+  if (!strategyType) {
+    return '系统默认';
+  }
+  return strategyOptions.value.find((option) => option.strategyType === strategyType)?.strategyName ?? strategyType;
+}
+
+function chunkStrategyTagType(executable: boolean | undefined): 'success' | 'warning' {
+  return executable ? 'success' : 'warning';
 }
 
 function safeText(value: string | null | undefined, fallback = '未设置'): string {
@@ -131,6 +185,24 @@ function filterModelOptions(modelType: AiModelType): AiModelConfig[] {
   return modelOptions.value.filter((model) => model.modelType === modelType && model.modelStatus === 'enabled');
 }
 
+function splitSeparators(value: string): string[] {
+  const separators = value
+    .split(',')
+    .map((item) => item.trim().replace(/\\n/g, '\n'))
+    .filter(Boolean);
+  return separators.length > 0 ? separators : ['\n# ', '\n## ', '\n### ', '\n\n', '\n', '。', '；', '，'];
+}
+
+function numberValue(config: KnowledgeChunkConfig, key: string, fallback: number): number {
+  const value = config[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function separatorsText(config: KnowledgeChunkConfig, key: string): string {
+  const value = config[key];
+  return Array.isArray(value) ? value.map(String).join(',') : strategyForm.separators;
+}
+
 function resetForm(): void {
   form.baseCode = '';
   form.baseName = '';
@@ -144,6 +216,18 @@ function resetForm(): void {
   form.vectorModelId = '';
   form.rerankModelId = '';
   form.displaySummary = '';
+}
+
+function resetStrategyForm(): void {
+  strategyForm.chunkStrategyType = 'fixed_overlap';
+  strategyForm.chunkSize = 1000;
+  strategyForm.overlapSize = 200;
+  strategyForm.minChunkSize = 100;
+  strategyForm.separators = '\\n# ,\\n## ,\\n### ,\\n\\n,\\n,。,；,，';
+  strategyForm.targetChunkSize = 1000;
+  strategyForm.maxChunkSize = 2000;
+  strategyForm.similarityThreshold = 0.72;
+  strategyForm.windowSize = 3;
 }
 
 function fillForm(base: KnowledgeBase): void {
@@ -161,9 +245,76 @@ function fillForm(base: KnowledgeBase): void {
   form.displaySummary = base.displaySummary ?? '';
 }
 
+function fillStrategyForm(strategy: KnowledgeBaseChunkStrategy): void {
+  const strategyType = strategy.chunkStrategyType ?? strategy.resolvedChunkStrategyType;
+  const config = strategy.chunkConfig ?? strategy.resolvedChunkConfig;
+  strategyForm.chunkStrategyType = strategyType;
+  strategyForm.chunkSize = numberValue(config, 'chunkSize', numberValue(config, 'targetChunkSize', 1000));
+  strategyForm.overlapSize = numberValue(config, 'overlapSize', 200);
+  strategyForm.minChunkSize = numberValue(config, 'minChunkSize', 100);
+  strategyForm.separators = separatorsText(config, strategyType === 'hybrid' ? 'recursiveSeparators' : 'separators');
+  strategyForm.targetChunkSize = numberValue(config, 'targetChunkSize', strategyForm.chunkSize);
+  strategyForm.maxChunkSize = numberValue(config, 'maxChunkSize', Math.max(2000, strategyForm.targetChunkSize));
+  strategyForm.similarityThreshold = numberValue(config, 'similarityThreshold', 0.72);
+  strategyForm.windowSize = numberValue(config, strategyType === 'hybrid' ? 'semanticWindow' : 'windowSize', 3);
+}
+
 function normalizeOptionalId(value: string): EntityId | null {
   const normalized = value.trim();
   return normalized ? normalized : null;
+}
+
+function buildChunkStrategyPayload(): KnowledgeBaseChunkStrategyPayload | null {
+  const option = selectedStrategyOption.value;
+  if (!option) {
+    showErrorMessage('请选择分块策略');
+    return null;
+  }
+  if (strategyForm.overlapSize >= strategyForm.chunkSize) {
+    showErrorMessage('重叠长度必须小于分块长度');
+    return null;
+  }
+  let chunkConfig: KnowledgeChunkConfig;
+  if (strategyForm.chunkStrategyType === 'recursive') {
+    chunkConfig = {
+      chunkSize: strategyForm.chunkSize,
+      overlapSize: strategyForm.overlapSize,
+      minChunkSize: strategyForm.minChunkSize,
+      separators: splitSeparators(strategyForm.separators),
+      keepSeparator: true,
+      fallbackStrategy: 'fixed_overlap',
+    };
+  } else if (strategyForm.chunkStrategyType === 'semantic') {
+    chunkConfig = {
+      targetChunkSize: strategyForm.targetChunkSize,
+      minChunkSize: strategyForm.minChunkSize,
+      maxChunkSize: strategyForm.maxChunkSize,
+      similarityThreshold: strategyForm.similarityThreshold,
+      windowSize: strategyForm.windowSize,
+      fallbackStrategy: 'recursive',
+    };
+  } else if (strategyForm.chunkStrategyType === 'hybrid') {
+    chunkConfig = {
+      targetChunkSize: strategyForm.targetChunkSize,
+      maxChunkSize: strategyForm.maxChunkSize,
+      recursiveSeparators: splitSeparators(strategyForm.separators),
+      semanticWindow: strategyForm.windowSize,
+      similarityThreshold: strategyForm.similarityThreshold,
+      fallbackStrategy: 'recursive',
+    };
+  } else {
+    chunkConfig = {
+      chunkSize: strategyForm.chunkSize,
+      overlapSize: strategyForm.overlapSize,
+      minChunkSize: strategyForm.minChunkSize,
+      lengthUnit: 'char',
+      preserveStructure: true,
+    };
+  }
+  return {
+    chunkStrategyType: strategyForm.chunkStrategyType,
+    chunkConfig,
+  };
 }
 
 function buildPayload(): KnowledgeBaseCreatePayload | KnowledgeBaseUpdatePayload | null {
@@ -234,6 +385,13 @@ async function loadKnowledgeBases(): Promise<void> {
 }
 
 async function loadAuxiliaryOptions(): Promise<void> {
+  if (canQueryChunkStrategy.value) {
+    try {
+      strategyOptions.value = await knowledgeApi.listKnowledgeChunkStrategies(false);
+    } catch (error) {
+      showErrorMessage(resolveErrorMessage(error, '分块策略选项加载失败'));
+    }
+  }
   if (hasPermission('ai:model:list')) {
     try {
       const pageData = await aiApi.listModels({ pageNo: 1, pageSize: 100, modelStatus: 'enabled' });
@@ -312,6 +470,49 @@ async function openDetailBase(base: KnowledgeBase): Promise<void> {
     showErrorMessage(resolveErrorMessage(error, '知识库详情加载失败'));
   } finally {
     detailLoading.value = false;
+  }
+}
+
+async function openChunkStrategy(base: KnowledgeBase): Promise<void> {
+  if (!canViewChunkStrategy.value) {
+    showErrorMessage('暂无知识库分块策略查看权限');
+    return;
+  }
+  strategyBase.value = base;
+  resetStrategyForm();
+  strategyDialogVisible.value = true;
+  strategyLoading.value = true;
+  try {
+    const strategy = await knowledgeApi.getKnowledgeBaseChunkStrategy(base.knowledgeBaseId);
+    if (strategy.strategyOptions.length > 0) {
+      strategyOptions.value = strategy.strategyOptions;
+    }
+    fillStrategyForm(strategy);
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '分块策略加载失败'));
+  } finally {
+    strategyLoading.value = false;
+  }
+}
+
+async function submitChunkStrategy(): Promise<void> {
+  if (!strategyBase.value) {
+    return;
+  }
+  const payload = buildChunkStrategyPayload();
+  if (!payload) {
+    return;
+  }
+  saving.value = true;
+  try {
+    await knowledgeApi.saveKnowledgeBaseChunkStrategy(strategyBase.value.knowledgeBaseId, payload);
+    showSuccessMessage('分块策略已保存');
+    strategyDialogVisible.value = false;
+    await loadKnowledgeBases();
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '分块策略保存失败'));
+  } finally {
+    saving.value = false;
   }
 }
 
@@ -473,6 +674,9 @@ onMounted(async () => {
         <el-table-column label="文档数" width="104">
           <template #default="{ row }">{{ row.visibleDocumentCount }} / {{ row.documentCount }}</template>
         </el-table-column>
+        <el-table-column label="分块策略" min-width="130" show-overflow-tooltip>
+          <template #default="{ row }">{{ chunkStrategyText(row.chunkStrategyType) }}</template>
+        </el-table-column>
         <el-table-column label="语言模型" min-width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ safeText(row.languageModelName) }}</template>
         </el-table-column>
@@ -485,10 +689,11 @@ onMounted(async () => {
         <el-table-column label="摘要" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">{{ safeText(row.displaySummary || row.description) }}</template>
         </el-table-column>
-        <el-table-column v-if="canOperateBase" label="操作" width="256" fixed="right">
+        <el-table-column v-if="canOperateBase" label="操作" width="304" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canViewBase" link type="primary" @click="openDetailBase(row)">详情</el-button>
             <el-button v-if="canQueryDocument" link type="primary" @click="openDocumentManagement(row)">文档</el-button>
+            <el-button v-if="canViewChunkStrategy" link type="primary" @click="openChunkStrategy(row)">策略</el-button>
             <el-button v-if="canUpdateBase" link type="primary" @click="openEditBase(row)">编辑</el-button>
             <el-button v-if="canUpdateStatus" link type="primary" @click="changeBaseStatus(row)">
               {{ row.baseStatus === 'enabled' ? '停用' : '启用' }}
@@ -635,9 +840,115 @@ onMounted(async () => {
         <el-descriptions-item label="语言模型">{{ safeText(detailBase.languageModelName) }}</el-descriptions-item>
         <el-descriptions-item label="向量模型">{{ safeText(detailBase.vectorModelName) }}</el-descriptions-item>
         <el-descriptions-item label="重排模型">{{ safeText(detailBase.rerankModelName) }}</el-descriptions-item>
+        <el-descriptions-item label="分块策略">{{ chunkStrategyText(detailBase.chunkStrategyType) }}</el-descriptions-item>
         <el-descriptions-item label="展示摘要" :span="2">{{ safeText(detailBase.displaySummary) }}</el-descriptions-item>
         <el-descriptions-item label="描述" :span="2">{{ safeText(detailBase.description) }}</el-descriptions-item>
       </el-descriptions>
+    </el-dialog>
+
+    <el-dialog
+      v-model="strategyDialogVisible"
+      :title="strategyBase ? `处理策略：${strategyBase.baseName}` : '处理策略'"
+      width="720px"
+      align-center
+    >
+      <el-skeleton v-if="strategyLoading" :rows="6" animated />
+      <el-form v-else :model="strategyForm" label-position="top" class="knowledge-form">
+        <el-alert
+          title="保存配置不等于立即生成分块；发布或处理文档时才会生成处理版本和 chunk。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+        <div class="chunk-strategy-summary">
+          <span>当前策略</span>
+          <el-tag :type="chunkStrategyTagType(selectedStrategyOption?.executable)">
+            {{ selectedStrategyOption?.strategyName || chunkStrategyText(strategyForm.chunkStrategyType) }}
+          </el-tag>
+          <span v-if="selectedStrategyOption && !selectedStrategyOption.executable" class="chunk-strategy-summary__warning">
+            {{ selectedStrategyOption.disabledReason }}
+          </span>
+        </div>
+        <div class="knowledge-form__grid">
+          <el-form-item label="分块方式" required>
+            <el-select v-model="strategyForm.chunkStrategyType" filterable>
+              <el-option
+                v-for="option in concreteStrategyOptions"
+                :key="option.strategyType"
+                :label="option.strategyName"
+                :value="option.strategyType"
+              >
+                <span>{{ option.strategyName }}</span>
+                <el-tag class="chunk-option-tag" size="small" :type="chunkStrategyTagType(option.executable)">
+                  {{ option.executable ? '可执行' : '预留' }}
+                </el-tag>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item
+            v-if="strategyForm.chunkStrategyType === 'fixed_overlap' || strategyForm.chunkStrategyType === 'recursive'"
+            label="分块长度"
+            required
+          >
+            <el-input-number v-model="strategyForm.chunkSize" :min="300" :max="4000" controls-position="right" />
+          </el-form-item>
+          <el-form-item
+            v-if="strategyForm.chunkStrategyType === 'fixed_overlap' || strategyForm.chunkStrategyType === 'recursive'"
+            label="重叠长度"
+            required
+          >
+            <el-input-number v-model="strategyForm.overlapSize" :min="0" :max="1000" controls-position="right" />
+          </el-form-item>
+          <el-form-item
+            v-if="strategyForm.chunkStrategyType !== 'hybrid'"
+            label="最小片段长度"
+            required
+          >
+            <el-input-number v-model="strategyForm.minChunkSize" :min="20" :max="4000" controls-position="right" />
+          </el-form-item>
+          <el-form-item
+            v-if="strategyForm.chunkStrategyType === 'semantic' || strategyForm.chunkStrategyType === 'hybrid'"
+            label="目标片段长度"
+            required
+          >
+            <el-input-number v-model="strategyForm.targetChunkSize" :min="300" :max="4000" controls-position="right" />
+          </el-form-item>
+          <el-form-item
+            v-if="strategyForm.chunkStrategyType === 'semantic' || strategyForm.chunkStrategyType === 'hybrid'"
+            label="最大片段长度"
+            required
+          >
+            <el-input-number v-model="strategyForm.maxChunkSize" :min="300" :max="8000" controls-position="right" />
+          </el-form-item>
+          <el-form-item
+            v-if="strategyForm.chunkStrategyType === 'semantic' || strategyForm.chunkStrategyType === 'hybrid'"
+            label="语义相似度阈值"
+            required
+          >
+            <el-input-number
+              v-model="strategyForm.similarityThreshold"
+              :min="0.1"
+              :max="0.95"
+              :step="0.01"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item
+            v-if="strategyForm.chunkStrategyType === 'semantic' || strategyForm.chunkStrategyType === 'hybrid'"
+            label="语义窗口"
+            required
+          >
+            <el-input-number v-model="strategyForm.windowSize" :min="1" :max="8" controls-position="right" />
+          </el-form-item>
+        </div>
+        <el-form-item v-if="strategyForm.chunkStrategyType === 'recursive' || strategyForm.chunkStrategyType === 'hybrid'" label="结构分隔符">
+          <el-input v-model="strategyForm.separators" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="strategyDialogVisible = false">取消</el-button>
+        <el-button v-if="canSaveChunkStrategy" type="primary" :loading="saving" @click="submitChunkStrategy">保存</el-button>
+      </template>
     </el-dialog>
 
   </section>
@@ -666,6 +977,24 @@ onMounted(async () => {
 
 .knowledge-form :deep(.el-input-number) {
   width: 100%;
+}
+
+.chunk-strategy-summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.chunk-strategy-summary__warning {
+  color: var(--el-color-warning);
+}
+
+.chunk-option-tag {
+  float: right;
+  margin-top: 6px;
 }
 
 .knowledge-summary {

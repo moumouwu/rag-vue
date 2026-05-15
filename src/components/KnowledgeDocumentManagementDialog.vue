@@ -16,6 +16,7 @@ import type {
   KnowledgeBase,
   KnowledgeDocument,
   KnowledgeDocumentBusinessStatus,
+  KnowledgeDocumentChunk,
   KnowledgeDocumentCreatePayload,
   KnowledgeDocumentProcessingStatus,
   KnowledgeDocumentSourceType,
@@ -74,9 +75,18 @@ const saving = ref(false);
 const formVisible = ref(false);
 const uploadVisible = ref(false);
 const permissionVisible = ref(false);
+const chunkVisible = ref(false);
 const formMode = ref<FormMode>('create');
 const editingDocumentId = ref<EntityId | null>(null);
 const permissionDocumentId = ref<EntityId | null>(null);
+const chunkDocument = ref<KnowledgeDocument | null>(null);
+const chunks = ref<KnowledgeDocumentChunk[]>([]);
+const selectedChunk = ref<KnowledgeDocumentChunk | null>(null);
+const chunkLoading = ref(false);
+const chunkDetailLoading = ref(false);
+const chunkPageNo = ref(1);
+const chunkPageSize = ref(10);
+const chunkTotal = ref(0);
 const keyword = ref('');
 const sourceTypeFilter = ref<KnowledgeDocumentSourceType | ''>('');
 const businessStatusFilter = ref<KnowledgeDocumentBusinessStatus | ''>('');
@@ -126,8 +136,11 @@ const canViewDocument = computed(() => hasPermission('knowledge:document:detail'
 const canCreateDocument = computed(() => hasPermission('knowledge:document:create'));
 const canUpdateDocument = computed(() => hasPermission('knowledge:document:update'));
 const canUpdateStatus = computed(() => hasPermission('knowledge:document:status'));
+const canReprocessDocument = computed(() => hasPermission('knowledge:document:reprocess'));
 const canDeleteDocument = computed(() => hasPermission('knowledge:document:delete'));
 const canQueryPermission = computed(() => hasPermission('knowledge:document:permission-query'));
+const canQueryChunks = computed(() => hasPermission('knowledge:document-chunk:query'));
+const canViewChunkDetail = computed(() => hasPermission('knowledge:document-chunk:detail'));
 const canQueryChunkStrategy = computed(() => hasPermission('knowledge:chunk-strategy:query'));
 const canViewBaseChunkStrategy = computed(() => hasPermission('knowledge:base:chunk-strategy-detail'));
 const canSubmitDocument = computed(() => (formMode.value === 'create' ? canCreateDocument.value : canUpdateDocument.value));
@@ -135,8 +148,10 @@ const canOperateDocument = computed(() => hasAnyPermission([
   'knowledge:document:detail',
   'knowledge:document:update',
   'knowledge:document:status',
+  'knowledge:document:reprocess',
   'knowledge:document:delete',
   'knowledge:document:permission-query',
+  'knowledge:document-chunk:query',
 ]));
 const hasDeptOptions = computed(() => deptOptions.value.length > 0);
 const selectedStrategyOption = computed(() =>
@@ -213,6 +228,34 @@ function ownerDeptText(document: KnowledgeDocument): string {
     return '未限定部门';
   }
   return safeText(document.ownerDeptName, String(document.ownerDeptId));
+}
+
+function chunkSourcePositionText(chunk: KnowledgeDocumentChunk): string {
+  const pageText = chunk.sourcePageNo == null ? '页码未记录' : `第 ${chunk.sourcePageNo} 页`;
+  const offsetText = chunk.sourceStartOffset == null || chunk.sourceEndOffset == null
+    ? '偏移未记录'
+    : `${chunk.sourceStartOffset}-${chunk.sourceEndOffset}`;
+  return `${pageText} / ${offsetText}`;
+}
+
+function chunkEmptyDescription(): string {
+  const document = chunkDocument.value;
+  if (!document) {
+    return '请选择文档';
+  }
+  if (!document.activeProcessingVersion) {
+    return '当前文档还没有生效处理版本';
+  }
+  if (document.processingStatus === 'processing') {
+    return '文档仍在处理中，分块生成完成后可查看';
+  }
+  if (document.processingStatus === 'failed') {
+    return '文档处理失败，暂无可查看分块';
+  }
+  if (document.processingStatus === 'expired') {
+    return '当前处理结果已过期，请重新处理后查看最新分块';
+  }
+  return '当前处理版本暂无分块';
 }
 
 function normalizeOptionalId(value: string): EntityId | null {
@@ -544,6 +587,25 @@ async function changeBusinessStatus(document: KnowledgeDocument, nextStatus: Kno
   }
 }
 
+async function reprocessDocument(document: KnowledgeDocument): Promise<void> {
+  const confirmed = await confirmAction({
+    title: '重新处理',
+    message: `确认重新处理文档“${document.title}”吗？系统会重新解析来源并在后台重建分块和向量索引。`,
+    confirmButtonText: '重新处理',
+  });
+  if (!confirmed) {
+    return;
+  }
+  try {
+    await knowledgeApi.reprocessKnowledgeDocument(document.documentId);
+    showSuccessMessage('文档已提交重新处理');
+    await loadDocuments();
+    emit('changed');
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '文档重新处理失败'));
+  }
+}
+
 async function deleteDocument(document: KnowledgeDocument): Promise<void> {
   const confirmed = await confirmAction({
     title: '删除文档',
@@ -568,6 +630,72 @@ function openPermission(document: KnowledgeDocument): void {
   permissionVisible.value = true;
 }
 
+async function openChunks(document: KnowledgeDocument): Promise<void> {
+  chunkDocument.value = document;
+  chunks.value = [];
+  selectedChunk.value = null;
+  chunkPageNo.value = 1;
+  chunkTotal.value = 0;
+  chunkVisible.value = true;
+  await loadChunks();
+}
+
+async function loadChunks(): Promise<void> {
+  const document = chunkDocument.value;
+  if (!document || !canQueryChunks.value) {
+    chunks.value = [];
+    chunkTotal.value = 0;
+    return;
+  }
+  if (!document.activeProcessingVersion) {
+    chunks.value = [];
+    chunkTotal.value = 0;
+    return;
+  }
+  chunkLoading.value = true;
+  try {
+    const pageData = await knowledgeApi.listKnowledgeDocumentChunks(document.documentId, {
+      pageNo: chunkPageNo.value,
+      pageSize: chunkPageSize.value,
+      processingVersion: document.activeProcessingVersion,
+    });
+    chunkPageNo.value = pageData.pageNo;
+    chunkPageSize.value = pageData.pageSize;
+    chunkTotal.value = pageData.total;
+    chunks.value = pageData.list;
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '分块列表加载失败'));
+  } finally {
+    chunkLoading.value = false;
+  }
+}
+
+async function handleChunkPageChange(nextPageNo: number): Promise<void> {
+  chunkPageNo.value = nextPageNo;
+  await loadChunks();
+}
+
+async function handleChunkSizeChange(nextPageSize: number): Promise<void> {
+  chunkPageSize.value = nextPageSize;
+  chunkPageNo.value = 1;
+  await loadChunks();
+}
+
+async function viewChunkDetail(chunk: KnowledgeDocumentChunk): Promise<void> {
+  const document = chunkDocument.value;
+  if (!document || !canViewChunkDetail.value) {
+    return;
+  }
+  chunkDetailLoading.value = true;
+  try {
+    selectedChunk.value = await knowledgeApi.getKnowledgeDocumentChunk(document.documentId, chunk.chunkId);
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '分块详情加载失败'));
+  } finally {
+    chunkDetailLoading.value = false;
+  }
+}
+
 function handleUploaded(file: SystemFile): void {
   // 上传文件只回填来源文件ID，是否可用于文档来源仍以后端保存校验为准。
   form.sourceType = 'uploaded_file';
@@ -586,6 +714,13 @@ function canOffline(document: KnowledgeDocument): boolean {
 
 function canArchive(document: KnowledgeDocument): boolean {
   return canUpdateStatus.value && document.businessStatus !== 'archived';
+}
+
+function canReprocess(document: KnowledgeDocument): boolean {
+  return canReprocessDocument.value
+    && document.businessStatus === 'published'
+    && document.processingStatus !== 'processing'
+    && document.sourceType !== 'external_link';
 }
 
 function backToKnowledgeBases(): void {
@@ -681,10 +816,12 @@ onMounted(async () => {
         <el-table-column label="摘要" min-width="210" show-overflow-tooltip>
           <template #default="{ row }">{{ safeText(row.summary) }}</template>
         </el-table-column>
-        <el-table-column v-if="canOperateDocument" label="操作" width="292" fixed="right">
+        <el-table-column v-if="canOperateDocument" label="操作" width="396" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canViewDocument && canUpdateDocument" link type="primary" @click="openEditDocument(row)">编辑</el-button>
+            <el-button v-if="canQueryChunks" link type="primary" @click="openChunks(row)">分块</el-button>
             <el-button v-if="canPublish(row)" link type="primary" @click="changeBusinessStatus(row, 'published')">发布</el-button>
+            <el-button v-if="canReprocess(row)" link type="primary" @click="reprocessDocument(row)">重新处理</el-button>
             <el-button v-if="canOffline(row)" link type="primary" @click="changeBusinessStatus(row, 'offline')">下线</el-button>
             <el-button v-if="canArchive(row)" link type="primary" @click="changeBusinessStatus(row, 'archived')">归档</el-button>
             <el-button v-if="canQueryPermission" link type="primary" @click="openPermission(row)">权限</el-button>
@@ -888,6 +1025,81 @@ onMounted(async () => {
       v-model="permissionVisible"
       :document-id="permissionDocumentId"
     />
+
+    <el-drawer v-model="chunkVisible" title="文档分块" size="72%" append-to-body>
+      <div v-if="chunkDocument" class="chunk-drawer">
+        <div class="chunk-drawer__summary">
+          <div>
+            <div class="chunk-drawer__title">{{ chunkDocument.title }}</div>
+            <div class="chunk-drawer__meta">
+              当前处理版本：{{ chunkDocument.activeProcessingVersion || '未生成' }} /
+              处理状态：{{ chunkDocument.processingStatusName || processingStatusText(chunkDocument.processingStatus) }}
+            </div>
+          </div>
+          <el-tag :type="businessStatusTagType(chunkDocument.businessStatus)">
+            {{ chunkDocument.businessStatusName || businessStatusText(chunkDocument.businessStatus) }}
+          </el-tag>
+        </div>
+
+        <el-empty v-if="!canQueryChunks" description="暂无分块查询权限" />
+        <template v-else>
+          <el-table v-loading="chunkLoading" :data="chunks" border row-key="chunkId" class="chunk-table">
+            <el-table-column prop="chunkSeq" label="序号" width="72" />
+            <el-table-column label="标题路径" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">{{ safeText(row.titlePath, '未记录标题路径') }}</template>
+            </el-table-column>
+            <el-table-column label="来源位置" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ chunkSourcePositionText(row) }}</template>
+            </el-table-column>
+            <el-table-column prop="charCount" label="字符数" width="86" />
+            <el-table-column prop="tokenCount" label="Token" width="86" />
+            <el-table-column label="片段摘要" min-width="280" show-overflow-tooltip>
+              <template #default="{ row }">{{ safeText(row.contentText, '暂无摘要') }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="84">
+              <template #default="{ row }">
+                <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '可检索' : '停用' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="canViewChunkDetail" label="操作" width="80" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="viewChunkDetail(row)">详情</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!chunkLoading && chunks.length === 0" :description="chunkEmptyDescription()" />
+          <div class="document-pagination">
+            <el-pagination
+              v-model:current-page="chunkPageNo"
+              v-model:page-size="chunkPageSize"
+              background
+              :page-sizes="[10, 20, 50, 100]"
+              :total="chunkTotal"
+              layout="total, sizes, prev, pager, next"
+              @current-change="handleChunkPageChange"
+              @size-change="handleChunkSizeChange"
+            />
+          </div>
+        </template>
+
+        <el-divider />
+        <el-skeleton v-if="chunkDetailLoading" :rows="5" animated />
+        <div v-else-if="selectedChunk" class="chunk-detail">
+          <div class="chunk-detail__header">
+            <strong>Chunk #{{ selectedChunk.chunkSeq }}</strong>
+            <span>{{ chunkSourcePositionText(selectedChunk) }}</span>
+          </div>
+          <div class="chunk-detail__meta">
+            <span>处理版本：{{ selectedChunk.processingVersion }}</span>
+            <span>业务版本：{{ selectedChunk.basedOnBusinessVersion }}</span>
+            <span>字符数：{{ selectedChunk.charCount }}</span>
+            <span>Token：{{ selectedChunk.tokenCount }}</span>
+          </div>
+          <el-input :model-value="selectedChunk.contentText" type="textarea" :rows="10" readonly />
+        </div>
+        <el-empty v-else description="选择一个分块查看详情" />
+      </div>
+    </el-drawer>
   </section>
 </template>
 
@@ -975,6 +1187,42 @@ onMounted(async () => {
   display: grid;
   gap: 8px;
   width: 100%;
+}
+
+.chunk-drawer {
+  display: grid;
+  gap: 14px;
+}
+
+.chunk-drawer__summary,
+.chunk-detail__header,
+.chunk-detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chunk-drawer__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.chunk-drawer__meta,
+.chunk-detail__meta {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+}
+
+.chunk-table {
+  width: 100%;
+}
+
+.chunk-detail {
+  display: grid;
+  gap: 10px;
 }
 
 @media (max-width: 860px) {

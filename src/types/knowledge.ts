@@ -197,3 +197,28 @@ export type KnowledgeDocumentUpdatePayload = Omit<KnowledgeDocumentCreatePayload
 export interface KnowledgeDocumentBusinessStatusUpdatePayload {
   businessStatus: KnowledgeDocumentBusinessStatus;
 }
+
+export interface KnowledgeDocumentChunk {
+  chunkId: EntityId;
+  documentId: EntityId;
+  knowledgeBaseId: EntityId;
+  documentTitle: string | null;
+  processingVersion: number;
+  basedOnBusinessVersion: number;
+  chunkSeq: number;
+  titlePath: string;
+  sourcePageNo: number | null;
+  sourceStartOffset: number | null;
+  sourceEndOffset: number | null;
+  charCount: number;
+  tokenCount: number;
+  contentChecksum: string;
+  contentText: string;
+  enabled: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface KnowledgeDocumentChunkQuery extends Partial<PageRequest> {
+  processingVersion?: number | '';
+}

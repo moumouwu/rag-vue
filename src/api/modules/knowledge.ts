@@ -10,6 +10,8 @@ import type {
   KnowledgeChunkStrategyOption,
   KnowledgeDocument,
   KnowledgeDocumentBusinessStatusUpdatePayload,
+  KnowledgeDocumentChunk,
+  KnowledgeDocumentChunkQuery,
   KnowledgeDocumentCreatePayload,
   KnowledgeDocumentPermissionAssignPayload,
   KnowledgeDocumentPermissionAuthorization,
@@ -128,9 +130,39 @@ export const knowledgeApi = {
     );
   },
 
+  // 重新处理会重新解析来源并入后台任务，前端不能直接修改处理状态或分块结果。
+  reprocessKnowledgeDocument(documentId: EntityId): Promise<KnowledgeDocument> {
+    return apiRequest.post<KnowledgeDocument, undefined>(
+      `/api/v1/knowledge/documents/${documentId}/reprocess`,
+      undefined,
+    );
+  },
+
   // 删除文档走逻辑删除，后端公共 Mapper 会写入更新审计字段。
   deleteKnowledgeDocument(documentId: EntityId): Promise<void> {
     return apiRequest.delete<void>(`/api/v1/knowledge/documents/${documentId}`);
+  },
+
+  // 分块列表继承文档访问权限，未传处理版本时后端使用当前生效版本；前端只做查看，不触发处理。
+  listKnowledgeDocumentChunks(
+    documentId: EntityId,
+    query: KnowledgeDocumentChunkQuery = {},
+  ): Promise<PageData<KnowledgeDocumentChunk>> {
+    return apiRequest.get<PageData<KnowledgeDocumentChunk>>(buildQueryUrl(
+      `/api/v1/knowledge/documents/${documentId}/chunks`,
+      {
+        pageNo: query.pageNo,
+        pageSize: query.pageSize,
+        processingVersion: query.processingVersion,
+      },
+    ));
+  },
+
+  // 分块详情必须携带文档ID，后端按文档权限校验，避免只凭 chunkId 枚举跨文档内容。
+  getKnowledgeDocumentChunk(documentId: EntityId, chunkId: EntityId): Promise<KnowledgeDocumentChunk> {
+    return apiRequest.get<KnowledgeDocumentChunk>(
+      `/api/v1/knowledge/documents/${documentId}/chunks/${chunkId}`,
+    );
   },
 
   // 文档授权查询聚合返回部门、角色、用户可选项，前端不再依赖普通列表接口权限。

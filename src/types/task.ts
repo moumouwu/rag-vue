@@ -87,6 +87,11 @@ export interface BatchRerunRequest {
   filterCondition?: FilterCondition;
 }
 
+export interface BatchReprocessRequest {
+  knowledgeBaseId: string;
+  filterCondition?: FilterCondition;
+}
+
 export interface BatchRerunData {
   batchTaskId: string;
   taskCount: number;

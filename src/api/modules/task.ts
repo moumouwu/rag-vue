@@ -1,5 +1,6 @@
 import { apiRequest } from '../request';
 import type {
+  BatchReprocessRequest,
   BatchRerunData,
   BatchRerunRequest,
   PageData,
@@ -49,5 +50,9 @@ export const taskApi = {
   // 批量重跑按后端筛选条件执行，前端不展开成多次单任务请求。
   batchRerun(payload: BatchRerunRequest): Promise<BatchRerunData> {
     return apiRequest.post<BatchRerunData, BatchRerunRequest>(`${TASK_BASE_PATH}/batch-rerun`, payload);
+  },
+  // 批量重处理按文档筛选创建父子任务，与失败任务重跑分开，避免语义混用。
+  batchReprocess(payload: BatchReprocessRequest): Promise<BatchRerunData> {
+    return apiRequest.post<BatchRerunData, BatchReprocessRequest>(`${TASK_BASE_PATH}/batch-reprocess`, payload);
   },
 };

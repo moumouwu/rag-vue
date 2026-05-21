@@ -42,6 +42,11 @@ interface BatchRerunForm {
   filterConditionText: string;
 }
 
+interface BatchReprocessForm {
+  knowledgeBaseId: string;
+  filterConditionText: string;
+}
+
 const taskPageForm = reactive<TaskPageForm>({
   taskType: 'document_vectorization',
   taskStatus: '',
@@ -65,6 +70,11 @@ const batchRerunForm = reactive<BatchRerunForm>({
   taskType: 'document_vectorization',
   knowledgeBaseId: '',
   filterConditionText: '{\n  "taskStatus": "failed"\n}',
+});
+
+const batchReprocessForm = reactive<BatchReprocessForm>({
+  knowledgeBaseId: '',
+  filterConditionText: '{\n  "businessStatus": "published"\n}',
 });
 
 const taskTypeOptions: Array<{ label: string; value: TaskType }> = [
@@ -103,6 +113,7 @@ const canViewTaskDetail = computed(() => hasPermission('task:center:detail'));
 const canQueryChildTasks = computed(() => hasPermission('task:center:children-query'));
 const canRetryTask = computed(() => hasPermission('task:center:retry'));
 const canBatchRerun = computed(() => hasPermission('task:center:batch-rerun'));
+const canBatchReprocess = computed(() => hasPermission('task:center:batch-reprocess'));
 const canOperateTask = computed(() =>
   hasAnyPermission(['task:center:detail', 'task:center:children-query', 'task:center:retry']),
 );
@@ -113,6 +124,7 @@ const loading = reactive({
   childPage: false,
   retry: false,
   batchRerun: false,
+  batchReprocess: false,
 });
 
 const taskRows = ref<TaskSummary[]>([]);
@@ -121,8 +133,10 @@ const taskDetail = ref<TaskDetailData | null>(null);
 const childTaskPageData = ref<PageData<TaskChildSummaryItem> | null>(null);
 const retryResult = ref<TaskRetryData | null>(null);
 const batchRerunResult = ref<BatchRerunData | null>(null);
+const batchReprocessResult = ref<BatchRerunData | null>(null);
 const detailDialogVisible = ref(false);
 const batchDialogVisible = ref(false);
+const batchReprocessDialogVisible = ref(false);
 const detailActiveTab = ref('timeline');
 
 const runningCount = computed(() => taskRows.value.filter((task) => task.taskStatus === 'running').length);
@@ -398,6 +412,37 @@ async function submitBatchRerun(): Promise<void> {
   }
 }
 
+// 批量重处理会重新解析文档并生成新业务版本，必须限制在明确知识库范围内。
+function openBatchReprocessDialog(): void {
+  batchReprocessDialogVisible.value = true;
+  batchReprocessResult.value = null;
+}
+
+// 批量重处理由后端创建父子任务，前端只提交结构化筛选条件。
+async function submitBatchReprocess(): Promise<void> {
+  if (!canBatchReprocess.value) {
+    return;
+  }
+  const knowledgeBaseId = normalizeOptionalText(batchReprocessForm.knowledgeBaseId);
+  if (!knowledgeBaseId) {
+    showErrorMessage('知识库 ID 不能为空');
+    return;
+  }
+  loading.batchReprocess = true;
+  try {
+    batchReprocessResult.value = await taskApi.batchReprocess({
+      knowledgeBaseId,
+      filterCondition: parseFilterCondition(batchReprocessForm.filterConditionText),
+    });
+    showSuccessMessage(`已提交批量重处理，批次任务 ID：${batchReprocessResult.value.batchTaskId}`);
+    await loadTasks();
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '批量重处理提交失败'));
+  } finally {
+    loading.batchReprocess = false;
+  }
+}
+
 onMounted(loadTasks);
 </script>
 
@@ -411,6 +456,7 @@ onMounted(loadTasks);
       <div class="task-center-actions">
         <el-button :disabled="!canQueryTasks" :loading="loading.paging" @click="loadTasks">刷新</el-button>
         <el-button v-if="canBatchRerun" type="primary" @click="openBatchRerunDialog">批量重跑</el-button>
+        <el-button v-if="canBatchReprocess" type="primary" @click="openBatchReprocessDialog">批量重处理</el-button>
       </div>
     </div>
 
@@ -666,6 +712,43 @@ onMounted(loadTasks);
       <template #footer>
         <el-button @click="batchDialogVisible = false">关闭</el-button>
         <el-button type="primary" :loading="loading.batchRerun" @click="submitBatchRerun">提交批量重跑</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="batchReprocessDialogVisible" title="批量重处理" width="680px" align-center>
+      <el-form :model="batchReprocessForm" label-position="top" class="task-batch-form">
+        <el-alert
+          type="warning"
+          show-icon
+          :closable="false"
+          title="影响范围为当前知识库内满足过滤条件的已发布文档，处理中和外部链接文档不会进入候选。"
+        />
+        <el-form-item label="知识库 ID" required>
+          <el-input v-model="batchReprocessForm.knowledgeBaseId" clearable placeholder="必填" />
+        </el-form-item>
+        <el-form-item label="过滤条件 JSON">
+          <el-input
+            v-model="batchReprocessForm.filterConditionText"
+            type="textarea"
+            :rows="7"
+            placeholder='例如：{"businessStatus":"published","processingStatus":"failed"}'
+          />
+        </el-form-item>
+        <el-alert
+          v-if="batchReprocessResult"
+          type="success"
+          show-icon
+          :closable="false"
+          :title="`已提交批量重处理，批次任务 ID：${batchReprocessResult.batchTaskId}`"
+        >
+          <template #default>
+            子任务数量：{{ batchReprocessResult.taskCount }}；状态：{{ taskStatusText(batchReprocessResult.taskStatus) }}
+          </template>
+        </el-alert>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchReprocessDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="loading.batchReprocess" @click="submitBatchReprocess">提交批量重处理</el-button>
       </template>
     </el-dialog>
   </section>

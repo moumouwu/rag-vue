@@ -16,6 +16,7 @@ import type {
   KnowledgeDocumentCreatePayload,
   KnowledgeDocumentPermissionAssignPayload,
   KnowledgeDocumentPermissionAuthorization,
+  KnowledgeDocumentProcessingVersion,
   KnowledgeDocumentQuery,
   KnowledgeDocumentUpdatePayload,
   PageData,
@@ -144,6 +145,23 @@ export const knowledgeApi = {
   // 删除文档走逻辑删除，后端公共 Mapper 会写入更新审计字段。
   deleteKnowledgeDocument(documentId: EntityId): Promise<void> {
     return apiRequest.delete<void>(`/api/v1/knowledge/documents/${documentId}`);
+  },
+
+  // 处理版本列表继承文档访问权限，只做历史快照查看，不允许前端切换生效版本。
+  listKnowledgeDocumentProcessingVersions(documentId: EntityId): Promise<KnowledgeDocumentProcessingVersion[]> {
+    return apiRequest.get<KnowledgeDocumentProcessingVersion[]>(
+      `/api/v1/knowledge/documents/${documentId}/processing-versions`,
+    );
+  },
+
+  // 处理版本详情用于排查策略、模型和失败原因，并作为历史版本分块查询的入口。
+  getKnowledgeDocumentProcessingVersion(
+    documentId: EntityId,
+    processingVersion: number,
+  ): Promise<KnowledgeDocumentProcessingVersion> {
+    return apiRequest.get<KnowledgeDocumentProcessingVersion>(
+      `/api/v1/knowledge/documents/${documentId}/processing-versions/${processingVersion}`,
+    );
   },
 
   // 分块列表继承文档访问权限，未传处理版本时后端使用当前生效版本；前端只做查看，不触发处理。

@@ -241,6 +241,39 @@ export interface KnowledgeDocumentBusinessStatusUpdatePayload {
   businessStatus: KnowledgeDocumentBusinessStatus;
 }
 
+export interface KnowledgeDocumentProcessingVersion {
+  processingVersionId: EntityId;
+  documentId: EntityId;
+  knowledgeBaseId: EntityId;
+  processingVersion: number;
+  basedOnBusinessVersion: number;
+  sourceFileId: EntityId | null;
+  sourceTextChecksum: string;
+  chunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'> | string;
+  chunkConfigJson: string;
+  embeddingModelCode: string;
+  vectorDimension: number | null;
+  vectorStoreProvider: string;
+  vectorWriteMode: string;
+  processingStatus: KnowledgeDocumentProcessingStatus;
+  processingStatusName: string;
+  parseStatus: KnowledgeDocumentProcessingStatus;
+  parseStatusName: string;
+  chunkStatus: KnowledgeDocumentProcessingStatus;
+  chunkStatusName: string;
+  vectorStatus: KnowledgeDocumentProcessingStatus;
+  vectorStatusName: string;
+  chunkCount: number;
+  vectorCount: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  failReason: string;
+  effective: boolean;
+  expired: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface KnowledgeDocumentChunk {
   chunkId: EntityId;
   documentId: EntityId;

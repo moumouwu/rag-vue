@@ -18,6 +18,7 @@ import type {
   KnowledgeDocumentBusinessStatus,
   KnowledgeDocumentChunk,
   KnowledgeDocumentCreatePayload,
+  KnowledgeDocumentProcessingVersion,
   KnowledgeDocumentProcessingStatus,
   KnowledgeDocumentSourceType,
   KnowledgeDocumentUpdatePayload,
@@ -76,16 +77,23 @@ const saving = ref(false);
 const formVisible = ref(false);
 const uploadVisible = ref(false);
 const permissionVisible = ref(false);
+const versionVisible = ref(false);
 const chunkVisible = ref(false);
 const formMode = ref<FormMode>('create');
 const editingDocumentId = ref<EntityId | null>(null);
 const permissionDocumentId = ref<EntityId | null>(null);
+const versionDocument = ref<KnowledgeDocument | null>(null);
 const chunkDocument = ref<KnowledgeDocument | null>(null);
 const editingDocument = ref<KnowledgeDocument | null>(null);
+const processingVersions = ref<KnowledgeDocumentProcessingVersion[]>([]);
+const selectedProcessingVersion = ref<KnowledgeDocumentProcessingVersion | null>(null);
 const chunks = ref<KnowledgeDocumentChunk[]>([]);
 const selectedChunk = ref<KnowledgeDocumentChunk | null>(null);
+const versionLoading = ref(false);
+const versionDetailLoading = ref(false);
 const chunkLoading = ref(false);
 const chunkDetailLoading = ref(false);
+const chunkProcessingVersion = ref<number | null>(null);
 const chunkPageNo = ref(1);
 const chunkPageSize = ref(10);
 const chunkTotal = ref(0);
@@ -141,6 +149,8 @@ const canUpdateStatus = computed(() => hasPermission('knowledge:document:status'
 const canReprocessDocument = computed(() => hasPermission('knowledge:document:reprocess'));
 const canDeleteDocument = computed(() => hasPermission('knowledge:document:delete'));
 const canQueryPermission = computed(() => hasPermission('knowledge:document:permission-query'));
+const canQueryProcessingVersions = computed(() => hasPermission('knowledge:document-processing-version:query'));
+const canViewProcessingVersionDetail = computed(() => hasPermission('knowledge:document-processing-version:detail'));
 const canQueryChunks = computed(() => hasPermission('knowledge:document-chunk:query'));
 const canViewChunkDetail = computed(() => hasPermission('knowledge:document-chunk:detail'));
 const canQueryChunkStrategy = computed(() => hasPermission('knowledge:chunk-strategy:query'));
@@ -151,6 +161,7 @@ const canOperateDocument = computed(() => hasAnyPermission([
   'knowledge:document:reprocess',
   'knowledge:document:delete',
   'knowledge:document:permission-query',
+  'knowledge:document-processing-version:query',
   'knowledge:document-chunk:query',
 ]));
 const hasDeptOptions = computed(() => deptOptions.value.length > 0);
@@ -203,6 +214,61 @@ function processingStatusText(status: KnowledgeDocumentProcessingStatus): string
   }[status];
 }
 
+function processingStatusTagType(status: KnowledgeDocumentProcessingStatus): 'info' | 'primary' | 'success' | 'warning' | 'danger' {
+  return ({
+    pending: 'info',
+    processing: 'primary',
+    succeeded: 'success',
+    failed: 'danger',
+    expired: 'warning',
+  } as const)[status];
+}
+
+function processingVersionTagType(version: KnowledgeDocumentProcessingVersion): 'info' | 'primary' | 'success' | 'warning' | 'danger' {
+  if (version.effective) {
+    return 'success';
+  }
+  if (version.expired) {
+    return 'warning';
+  }
+  return processingStatusTagType(version.processingStatus);
+}
+
+function processingVersionRelationText(version: KnowledgeDocumentProcessingVersion): string {
+  if (version.effective) {
+    return '生效';
+  }
+  if (version.expired) {
+    return '过期';
+  }
+  return version.processingStatusName || processingStatusText(version.processingStatus);
+}
+
+function timeText(value: string | null | undefined): string {
+  if (!value) {
+    return '未记录';
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function processingVersionEmptyDescription(): string {
+  const document = versionDocument.value;
+  if (!document) {
+    return '请选择文档';
+  }
+  if (document.processingStatus === 'processing') {
+    return '文档正在处理中，处理任务创建版本后可查看';
+  }
+  if (document.processingStatus === 'failed') {
+    return '文档处理失败但暂无处理版本记录，请查看任务中心失败原因';
+  }
+  if (document.processingStatus === 'expired') {
+    return '当前处理结果已过期，重新发布或重新处理后会生成新版本';
+  }
+  return '当前文档暂无处理版本';
+}
+
 function chunkStrategyText(strategyType: string | null | undefined): string {
   if (!strategyType) {
     return '跟随知识库默认';
@@ -243,8 +309,12 @@ function chunkEmptyDescription(): string {
   if (!document) {
     return '请选择文档';
   }
-  if (!document.activeProcessingVersion) {
+  const processingVersion = chunkProcessingVersion.value ?? document.activeProcessingVersion;
+  if (!processingVersion) {
     return '当前文档还没有生效处理版本';
+  }
+  if (chunkProcessingVersion.value && chunkProcessingVersion.value !== document.activeProcessingVersion) {
+    return `处理版本 ${chunkProcessingVersion.value} 暂无分块`;
   }
   if (document.processingStatus === 'processing') {
     return '文档仍在处理中，分块生成完成后可查看';
@@ -645,8 +715,68 @@ function openPermission(document: KnowledgeDocument): void {
   permissionVisible.value = true;
 }
 
-async function openChunks(document: KnowledgeDocument): Promise<void> {
+async function openProcessingVersions(document: KnowledgeDocument): Promise<void> {
+  versionDocument.value = document;
+  processingVersions.value = [];
+  selectedProcessingVersion.value = null;
+  versionVisible.value = true;
+  await loadProcessingVersions();
+}
+
+async function loadProcessingVersions(): Promise<void> {
+  const document = versionDocument.value;
+  if (!document || !canQueryProcessingVersions.value) {
+    processingVersions.value = [];
+    selectedProcessingVersion.value = null;
+    return;
+  }
+  versionLoading.value = true;
+  try {
+    const versions = await knowledgeApi.listKnowledgeDocumentProcessingVersions(document.documentId);
+    processingVersions.value = versions;
+    if (versions.length > 0) {
+      await selectProcessingVersion(versions[0]);
+    }
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '处理版本加载失败'));
+  } finally {
+    versionLoading.value = false;
+  }
+}
+
+async function selectProcessingVersion(version: KnowledgeDocumentProcessingVersion): Promise<void> {
+  const document = versionDocument.value;
+  if (!document) {
+    return;
+  }
+  if (!canViewProcessingVersionDetail.value) {
+    selectedProcessingVersion.value = version;
+    return;
+  }
+  versionDetailLoading.value = true;
+  try {
+    selectedProcessingVersion.value = await knowledgeApi.getKnowledgeDocumentProcessingVersion(
+      document.documentId,
+      version.processingVersion,
+    );
+  } catch (error) {
+    showErrorMessage(resolveErrorMessage(error, '处理版本详情加载失败'));
+  } finally {
+    versionDetailLoading.value = false;
+  }
+}
+
+async function openChunksFromVersion(version: KnowledgeDocumentProcessingVersion): Promise<void> {
+  const document = versionDocument.value;
+  if (!document) {
+    return;
+  }
+  await openChunks(document, version.processingVersion);
+}
+
+async function openChunks(document: KnowledgeDocument, processingVersion?: number): Promise<void> {
   chunkDocument.value = document;
+  chunkProcessingVersion.value = processingVersion ?? document.activeProcessingVersion ?? null;
   chunks.value = [];
   selectedChunk.value = null;
   chunkPageNo.value = 1;
@@ -662,7 +792,8 @@ async function loadChunks(): Promise<void> {
     chunkTotal.value = 0;
     return;
   }
-  if (!document.activeProcessingVersion) {
+  const processingVersion = chunkProcessingVersion.value ?? document.activeProcessingVersion;
+  if (!processingVersion) {
     chunks.value = [];
     chunkTotal.value = 0;
     return;
@@ -672,7 +803,7 @@ async function loadChunks(): Promise<void> {
     const pageData = await knowledgeApi.listKnowledgeDocumentChunks(document.documentId, {
       pageNo: chunkPageNo.value,
       pageSize: chunkPageSize.value,
-      processingVersion: document.activeProcessingVersion,
+      processingVersion,
     });
     chunkPageNo.value = pageData.pageNo;
     chunkPageSize.value = pageData.pageSize;
@@ -840,8 +971,9 @@ onMounted(async () => {
         <el-table-column label="摘要" min-width="210" show-overflow-tooltip>
           <template #default="{ row }">{{ safeText(row.summary) }}</template>
         </el-table-column>
-        <el-table-column v-if="canOperateDocument" label="操作" width="318" fixed="right">
+        <el-table-column v-if="canOperateDocument" label="操作" width="356" fixed="right">
           <template #default="{ row }">
+            <el-button v-if="canQueryProcessingVersions" link type="primary" @click="openProcessingVersions(row)">版本</el-button>
             <el-button v-if="canQueryChunks && row.activeProcessingVersion" link type="primary" @click="openChunks(row)">分块</el-button>
             <el-button v-if="canPublish(row)" link type="primary" @click="changeBusinessStatus(row, 'published')">发布</el-button>
             <el-button v-if="canReprocess(row)" link type="primary" @click="reprocessDocument(row)">重新处理</el-button>
@@ -1059,13 +1191,137 @@ onMounted(async () => {
       :document-id="permissionDocumentId"
     />
 
+    <el-drawer v-model="versionVisible" title="文档处理版本" size="78%" append-to-body>
+      <div v-if="versionDocument" class="version-drawer">
+        <div class="chunk-drawer__summary">
+          <div>
+            <div class="chunk-drawer__title">{{ versionDocument.title }}</div>
+            <div class="chunk-drawer__meta">
+              当前生效版本：{{ versionDocument.activeProcessingVersion || '未生成' }} /
+              处理状态：{{ versionDocument.processingStatusName || processingStatusText(versionDocument.processingStatus) }}
+            </div>
+          </div>
+          <el-tag :type="businessStatusTagType(versionDocument.businessStatus)">
+            {{ versionDocument.businessStatusName || businessStatusText(versionDocument.businessStatus) }}
+          </el-tag>
+        </div>
+
+        <el-empty v-if="!canQueryProcessingVersions" description="暂无处理版本查询权限" />
+        <template v-else>
+          <div class="version-drawer__body">
+            <div class="version-drawer__list">
+              <el-table
+                v-loading="versionLoading"
+                :data="processingVersions"
+                border
+                highlight-current-row
+                row-key="processingVersionId"
+                class="version-table"
+                @row-click="selectProcessingVersion"
+              >
+                <el-table-column prop="processingVersion" label="版本" width="72" />
+                <el-table-column prop="basedOnBusinessVersion" label="业务版本" width="86" />
+                <el-table-column label="状态" width="112">
+                  <template #default="{ row }">
+                    <el-tag :type="processingVersionTagType(row)" size="small">
+                      {{ processingVersionRelationText(row) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="分块/向量" width="98">
+                  <template #default="{ row }">{{ row.chunkCount || 0 }} / {{ row.vectorCount || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="完成时间" min-width="150" show-overflow-tooltip>
+                  <template #default="{ row }">{{ timeText(row.finishedAt) }}</template>
+                </el-table-column>
+              </el-table>
+              <el-empty
+                v-if="!versionLoading && processingVersions.length === 0"
+                :description="processingVersionEmptyDescription()"
+              />
+            </div>
+
+            <div class="version-detail">
+              <el-skeleton v-if="versionDetailLoading" :rows="7" animated />
+              <template v-else-if="selectedProcessingVersion">
+                <div class="version-detail__header">
+                  <strong>处理版本 {{ selectedProcessingVersion.processingVersion }}</strong>
+                  <el-tag :type="processingVersionTagType(selectedProcessingVersion)">
+                    {{ processingVersionRelationText(selectedProcessingVersion) }}
+                  </el-tag>
+                </div>
+                <div class="version-detail__metrics">
+                  <span>业务版本：{{ selectedProcessingVersion.basedOnBusinessVersion }}</span>
+                  <span>分块：{{ selectedProcessingVersion.chunkCount || 0 }}</span>
+                  <span>向量：{{ selectedProcessingVersion.vectorCount || 0 }}</span>
+                  <span>开始：{{ timeText(selectedProcessingVersion.startedAt) }}</span>
+                  <span>完成：{{ timeText(selectedProcessingVersion.finishedAt) }}</span>
+                </div>
+                <el-descriptions :column="2" border size="small" class="version-detail__descriptions">
+                  <el-descriptions-item label="分块策略">
+                    {{ chunkStrategyText(selectedProcessingVersion.chunkStrategyType) }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="分块配置">
+                    {{ safeText(selectedProcessingVersion.chunkConfigJson, '未记录') }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="向量模型">
+                    {{ safeText(selectedProcessingVersion.embeddingModelCode, '未记录') }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="向量维度">
+                    {{ selectedProcessingVersion.vectorDimension || '未记录' }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="向量库">
+                    {{ safeText(selectedProcessingVersion.vectorStoreProvider, '未记录') }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="写入模式">
+                    {{ safeText(selectedProcessingVersion.vectorWriteMode, '未记录') }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="解析状态">
+                    {{ selectedProcessingVersion.parseStatusName || processingStatusText(selectedProcessingVersion.parseStatus) }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="分块状态">
+                    {{ selectedProcessingVersion.chunkStatusName || processingStatusText(selectedProcessingVersion.chunkStatus) }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="向量状态">
+                    {{ selectedProcessingVersion.vectorStatusName || processingStatusText(selectedProcessingVersion.vectorStatus) }}
+                  </el-descriptions-item>
+                  <el-descriptions-item label="正文摘要">
+                    {{ safeText(selectedProcessingVersion.sourceTextChecksum, '未记录') }}
+                  </el-descriptions-item>
+                </el-descriptions>
+                <el-alert
+                  v-if="selectedProcessingVersion.failReason"
+                  :title="selectedProcessingVersion.failReason"
+                  type="error"
+                  show-icon
+                  :closable="false"
+                />
+                <div class="version-detail__actions">
+                  <el-button
+                    v-if="canQueryChunks"
+                    type="primary"
+                    :disabled="!selectedProcessingVersion.processingVersion"
+                    @click="openChunksFromVersion(selectedProcessingVersion)"
+                  >
+                    查看该版本分块
+                  </el-button>
+                  <el-text v-else type="info">暂无分块查询权限</el-text>
+                </div>
+              </template>
+              <el-empty v-else description="选择一个处理版本查看详情" />
+            </div>
+          </div>
+        </template>
+      </div>
+    </el-drawer>
+
     <el-drawer v-model="chunkVisible" title="文档分块" size="72%" append-to-body>
       <div v-if="chunkDocument" class="chunk-drawer">
         <div class="chunk-drawer__summary">
           <div>
             <div class="chunk-drawer__title">{{ chunkDocument.title }}</div>
             <div class="chunk-drawer__meta">
-              当前处理版本：{{ chunkDocument.activeProcessingVersion || '未生成' }} /
+              查看处理版本：{{ chunkProcessingVersion || chunkDocument.activeProcessingVersion || '未生成' }} /
               处理状态：{{ chunkDocument.processingStatusName || processingStatusText(chunkDocument.processingStatus) }}
             </div>
           </div>
@@ -1247,6 +1503,53 @@ onMounted(async () => {
   gap: 14px;
 }
 
+.version-drawer {
+  display: grid;
+  gap: 16px;
+}
+
+.version-drawer__body {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.92fr) minmax(0, 1.08fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.version-drawer__list,
+.version-detail {
+  min-width: 0;
+}
+
+.version-table {
+  width: 100%;
+}
+
+.version-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.version-detail__header,
+.version-detail__metrics,
+.version-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.version-detail__header {
+  justify-content: space-between;
+}
+
+.version-detail__metrics {
+  color: var(--el-text-color-secondary);
+}
+
+.version-detail__descriptions {
+  width: 100%;
+}
+
 .chunk-drawer__summary,
 .chunk-detail__header,
 .chunk-detail__meta {
@@ -1281,7 +1584,8 @@ onMounted(async () => {
 @media (max-width: 860px) {
   .document-toolbar,
   .document-form__grid,
-  .document-file-picker {
+  .document-file-picker,
+  .version-drawer__body {
     display: grid;
     grid-template-columns: 1fr;
   }

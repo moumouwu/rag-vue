@@ -1,8 +1,9 @@
 import type {
   EntityId,
   KnowledgeBase,
+  KnowledgeBaseConfig,
+  KnowledgeBaseConfigPayload,
   KnowledgeBaseChunkStrategy,
-  KnowledgeBaseChunkStrategyPayload,
   KnowledgeBaseCreatePayload,
   KnowledgeBaseQuery,
   KnowledgeBaseStatusUpdatePayload,
@@ -76,13 +77,15 @@ export const knowledgeApi = {
     return apiRequest.get<KnowledgeBaseChunkStrategy>(`/api/v1/knowledge/bases/${baseId}/chunk-strategy`);
   },
 
-  // 保存知识库默认策略只影响后续处理输入，后端不会自动改写历史处理版本。
-  saveKnowledgeBaseChunkStrategy(
-    baseId: EntityId,
-    payload: KnowledgeBaseChunkStrategyPayload,
-  ): Promise<KnowledgeBaseChunkStrategy> {
-    return apiRequest.put<KnowledgeBaseChunkStrategy, KnowledgeBaseChunkStrategyPayload>(
-      `/api/v1/knowledge/bases/${baseId}/chunk-strategy`,
+  // 配置页聚合查询处理策略、检索配置和模型下拉，避免一个页面拆多个后端接口导致保存口径漂移。
+  getKnowledgeBaseConfig(baseId: EntityId): Promise<KnowledgeBaseConfig> {
+    return apiRequest.get<KnowledgeBaseConfig>(`/api/v1/knowledge/bases/${baseId}/config`);
+  },
+
+  // 配置页一次保存处理策略和检索配置，后端在同一事务内保证两个配置项一致提交。
+  saveKnowledgeBaseConfig(baseId: EntityId, payload: KnowledgeBaseConfigPayload): Promise<KnowledgeBaseConfig> {
+    return apiRequest.put<KnowledgeBaseConfig, KnowledgeBaseConfigPayload>(
+      `/api/v1/knowledge/bases/${baseId}/config`,
       payload,
     );
   },

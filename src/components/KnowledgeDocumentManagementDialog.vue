@@ -56,6 +56,7 @@ interface DocumentFormState {
 const props = defineProps<{
   modelValue?: boolean;
   knowledgeBase?: KnowledgeBase | null;
+  embedded?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -80,6 +81,7 @@ const formMode = ref<FormMode>('create');
 const editingDocumentId = ref<EntityId | null>(null);
 const permissionDocumentId = ref<EntityId | null>(null);
 const chunkDocument = ref<KnowledgeDocument | null>(null);
+const editingDocument = ref<KnowledgeDocument | null>(null);
 const chunks = ref<KnowledgeDocumentChunk[]>([]);
 const selectedChunk = ref<KnowledgeDocumentChunk | null>(null);
 const chunkLoading = ref(false);
@@ -145,8 +147,6 @@ const canQueryChunkStrategy = computed(() => hasPermission('knowledge:chunk-stra
 const canViewBaseChunkStrategy = computed(() => hasPermission('knowledge:base:chunk-strategy-detail'));
 const canSubmitDocument = computed(() => (formMode.value === 'create' ? canCreateDocument.value : canUpdateDocument.value));
 const canOperateDocument = computed(() => hasAnyPermission([
-  'knowledge:document:detail',
-  'knowledge:document:update',
   'knowledge:document:status',
   'knowledge:document:reprocess',
   'knowledge:document:delete',
@@ -522,6 +522,7 @@ async function handleSizeChange(nextPageSize: number): Promise<void> {
 function openCreateDocument(): void {
   formMode.value = 'create';
   editingDocumentId.value = null;
+  editingDocument.value = null;
   resetForm();
   void loadChunkStrategyOptions();
   formVisible.value = true;
@@ -536,7 +537,8 @@ async function openEditDocument(document: KnowledgeDocument): Promise<void> {
   editingDocumentId.value = document.documentId;
   try {
     await loadChunkStrategyOptions();
-    fillForm(await knowledgeApi.getKnowledgeDocument(document.documentId));
+    editingDocument.value = await knowledgeApi.getKnowledgeDocument(document.documentId);
+    fillForm(editingDocument.value);
     formVisible.value = true;
   } catch (error) {
     showErrorMessage(resolveErrorMessage(error, '文档详情加载失败'));
@@ -568,22 +570,35 @@ async function submitDocument(): Promise<void> {
   }
 }
 
-async function changeBusinessStatus(document: KnowledgeDocument, nextStatus: KnowledgeDocumentBusinessStatus): Promise<void> {
+async function changeBusinessStatus(document: KnowledgeDocument, nextStatus: KnowledgeDocumentBusinessStatus): Promise<boolean> {
   const confirmed = await confirmAction({
     title: businessStatusText(nextStatus),
     message: `确认将文档“${document.title}”更新为${businessStatusText(nextStatus)}吗？`,
     confirmButtonText: businessStatusText(nextStatus),
   });
   if (!confirmed) {
-    return;
+    return false;
   }
   try {
     await knowledgeApi.updateKnowledgeDocumentBusinessStatus(document.documentId, { businessStatus: nextStatus });
     showSuccessMessage(`文档已${businessStatusText(nextStatus)}`);
     await loadDocuments();
     emit('changed');
+    return true;
   } catch (error) {
     showErrorMessage(resolveErrorMessage(error, '文档状态更新失败'));
+    return false;
+  }
+}
+
+async function archiveEditingDocument(): Promise<void> {
+  // 归档属于低频危险动作，放到详情/编辑层里，减少列表操作列的常驻按钮。
+  if (!editingDocument.value) {
+    return;
+  }
+  const archived = await changeBusinessStatus(editingDocument.value, 'archived');
+  if (archived) {
+    formVisible.value = false;
   }
 }
 
@@ -745,8 +760,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="workspace-card system-page knowledge-document-page">
-    <div class="system-page__header">
+  <section class="workspace-card system-page knowledge-document-page" :class="{ 'knowledge-document-page--embedded': embedded }">
+    <div v-if="!embedded" class="system-page__header">
       <div>
         <h2 class="section-heading__title">{{ pageTitle }}</h2>
         <p class="section-heading__desc">维护知识库文档来源、元数据、权限和处理状态。</p>
@@ -786,7 +801,16 @@ onMounted(async () => {
         <el-table-column label="文档标题" min-width="190" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="document-title">
-              <span>{{ row.title }}</span>
+              <el-button
+                v-if="canViewDocument"
+                link
+                type="primary"
+                class="document-title__link"
+                @click="openEditDocument(row)"
+              >
+                {{ row.title }}
+              </el-button>
+              <span v-else class="document-title__text">{{ row.title }}</span>
               <el-tag :type="businessStatusTagType(row.businessStatus)" size="small">
                 {{ row.businessStatusName || businessStatusText(row.businessStatus) }}
               </el-tag>
@@ -816,14 +840,15 @@ onMounted(async () => {
         <el-table-column label="摘要" min-width="210" show-overflow-tooltip>
           <template #default="{ row }">{{ safeText(row.summary) }}</template>
         </el-table-column>
-        <el-table-column v-if="canOperateDocument" label="操作" width="396" fixed="right">
+        <el-table-column v-if="canOperateDocument" label="操作" width="318" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canViewDocument && canUpdateDocument" link type="primary" @click="openEditDocument(row)">编辑</el-button>
-            <el-button v-if="canQueryChunks" link type="primary" @click="openChunks(row)">分块</el-button>
+            <el-button v-if="canQueryChunks && row.activeProcessingVersion" link type="primary" @click="openChunks(row)">分块</el-button>
             <el-button v-if="canPublish(row)" link type="primary" @click="changeBusinessStatus(row, 'published')">发布</el-button>
             <el-button v-if="canReprocess(row)" link type="primary" @click="reprocessDocument(row)">重新处理</el-button>
             <el-button v-if="canOffline(row)" link type="primary" @click="changeBusinessStatus(row, 'offline')">下线</el-button>
-            <el-button v-if="canArchive(row)" link type="primary" @click="changeBusinessStatus(row, 'archived')">归档</el-button>
+            <el-button v-if="!canViewDocument && canArchive(row)" link type="primary" @click="changeBusinessStatus(row, 'archived')">
+              归档
+            </el-button>
             <el-button v-if="canQueryPermission" link type="primary" @click="openPermission(row)">权限</el-button>
             <el-button v-if="canDeleteDocument" link type="danger" @click="deleteDocument(row)">删除</el-button>
           </template>
@@ -1006,6 +1031,14 @@ onMounted(async () => {
         </el-form-item>
       </el-form>
       <template #footer>
+        <el-button
+          v-if="formMode === 'edit' && editingDocument && canArchive(editingDocument)"
+          type="warning"
+          :disabled="saving"
+          @click="archiveEditingDocument"
+        >
+          归档
+        </el-button>
         <el-button @click="formVisible = false">取消</el-button>
         <el-button v-if="canSubmitDocument" type="primary" :loading="saving" @click="submitDocument">保存</el-button>
       </template>
@@ -1104,6 +1137,12 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.knowledge-document-page--embedded {
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+
 .document-toolbar {
   display: flex;
   gap: 10px;
@@ -1130,7 +1169,21 @@ onMounted(async () => {
   min-width: 0;
 }
 
-.document-title span {
+.document-title__link,
+.document-title__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-title__link {
+  justify-content: flex-start;
+  max-width: 100%;
+  padding: 0;
+}
+
+.document-title__link :deep(span) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -1,4 +1,4 @@
-import type { AiModelType } from './ai';
+import type { AiModelConfig, AiModelType } from './ai';
 import type { PageRequest } from './common';
 import type { EntityId, SystemDept, SystemRole, SystemUser } from './system';
 
@@ -28,6 +28,10 @@ export interface KnowledgeBase {
   vectorModelName: string | null;
   rerankModelId: EntityId | null;
   rerankModelName: string | null;
+  retrievalEnabled: boolean;
+  retrievalTopK: number;
+  retrievalTopN: number;
+  rerankEnabled: boolean;
   displaySummary: string;
   chunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'> | null;
   chunkConfigJson: string | null;
@@ -70,6 +74,32 @@ export interface KnowledgeBaseStatusUpdatePayload {
   baseStatus: KnowledgeBaseStatus;
 }
 
+export interface KnowledgeBaseRetrievalConfig {
+  knowledgeBaseId: EntityId;
+  baseName: string;
+  retrievalEnabled: boolean;
+  vectorModelId: EntityId | null;
+  vectorModelName: string | null;
+  topK: number;
+  topN: number;
+  rerankEnabled: boolean;
+  rerankModelId: EntityId | null;
+  rerankModelName: string | null;
+  systemDefaultTopK: number;
+  systemMaxTopK: number;
+  systemDefaultTopN: number;
+  systemMaxTopN: number;
+}
+
+export interface KnowledgeBaseRetrievalConfigPayload {
+  retrievalEnabled: boolean;
+  vectorModelId: EntityId | null;
+  topK: number;
+  topN: number;
+  rerankEnabled: boolean;
+  rerankModelId: EntityId | null;
+}
+
 export interface KnowledgeChunkStrategyOption {
   strategyType: KnowledgeChunkStrategyType;
   strategyName: string;
@@ -95,6 +125,19 @@ export interface KnowledgeBaseChunkStrategy {
 export interface KnowledgeBaseChunkStrategyPayload {
   chunkStrategyType: Exclude<KnowledgeChunkStrategyType, 'inherit'>;
   chunkConfig: KnowledgeChunkConfig;
+}
+
+export interface KnowledgeBaseConfig {
+  knowledgeBaseId: EntityId;
+  baseName: string;
+  chunkStrategy: KnowledgeBaseChunkStrategy;
+  retrievalConfig: KnowledgeBaseRetrievalConfig;
+  modelOptions: AiModelConfig[];
+}
+
+export interface KnowledgeBaseConfigPayload {
+  chunkStrategy: KnowledgeBaseChunkStrategyPayload;
+  retrievalConfig: KnowledgeBaseRetrievalConfigPayload;
 }
 
 export interface KnowledgeBaseModelOption {

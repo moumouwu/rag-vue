@@ -224,6 +224,12 @@ function processingStatusTagType(status: KnowledgeDocumentProcessingStatus): 'in
   } as const)[status];
 }
 
+function hasProcessingSummary(document: KnowledgeDocument): boolean {
+  return document.processingStatus === 'failed'
+    || document.processingStatus === 'expired'
+    || Boolean(document.latestProcessingFailureStage || document.latestProcessingFailReason);
+}
+
 function processingVersionTagType(version: KnowledgeDocumentProcessingVersion): 'info' | 'primary' | 'success' | 'warning' | 'danger' {
   if (version.effective) {
     return 'success';
@@ -250,6 +256,16 @@ function timeText(value: string | null | undefined): string {
   }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function processingSummaryText(document: KnowledgeDocument): string {
+  if (document.latestProcessingFailReason) {
+    return document.latestProcessingFailReason;
+  }
+  if (document.processingStatus === 'expired') {
+    return '当前旧处理结果已过期，需要重新处理后才可作为可信索引';
+  }
+  return '暂无失败摘要，请查看处理版本或任务中心';
 }
 
 function processingVersionEmptyDescription(): string {
@@ -863,10 +879,7 @@ function canArchive(document: KnowledgeDocument): boolean {
 }
 
 function canReprocess(document: KnowledgeDocument): boolean {
-  return canReprocessDocument.value
-    && document.businessStatus === 'published'
-    && document.processingStatus !== 'processing'
-    && document.sourceType !== 'external_link';
+  return canReprocessDocument.value && document.processingRetryable === true;
 }
 
 function backToKnowledgeBases(): void {
@@ -961,8 +974,24 @@ onMounted(async () => {
         <el-table-column label="归属部门" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ ownerDeptText(row) }}</template>
         </el-table-column>
-        <el-table-column label="处理状态" width="112">
-          <template #default="{ row }">{{ row.processingStatusName || processingStatusText(row.processingStatus) }}</template>
+        <el-table-column label="处理状态" width="132">
+          <template #default="{ row }">
+            <el-popover v-if="hasProcessingSummary(row)" placement="top" width="320" trigger="hover">
+              <template #reference>
+                <el-tag :type="processingStatusTagType(row.processingStatus)" size="small" class="processing-status-tag">
+                  {{ row.processingStatusName || processingStatusText(row.processingStatus) }}
+                </el-tag>
+              </template>
+              <div class="processing-summary">
+                <div>阶段：{{ row.latestProcessingFailureStage || '处理结果' }}</div>
+                <div>摘要：{{ processingSummaryText(row) }}</div>
+                <div>最近完成：{{ timeText(row.latestProcessingFinishedAt) }}</div>
+              </div>
+            </el-popover>
+            <el-tag v-else :type="processingStatusTagType(row.processingStatus)" size="small">
+              {{ row.processingStatusName || processingStatusText(row.processingStatus) }}
+            </el-tag>
+          </template>
         </el-table-column>
         <el-table-column label="分块策略" min-width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ chunkStrategyText(row.chunkStrategyType) }}</template>
@@ -1416,6 +1445,17 @@ onMounted(async () => {
 
 .document-table {
   width: 100%;
+}
+
+.processing-status-tag {
+  cursor: help;
+}
+
+.processing-summary {
+  display: grid;
+  gap: 6px;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .document-title {

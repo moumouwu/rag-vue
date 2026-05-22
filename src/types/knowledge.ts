@@ -192,6 +192,10 @@ export interface KnowledgeDocument {
   businessVersion: number;
   latestProcessingVersion: number;
   activeProcessingVersion: number;
+  latestProcessingFailureStage: string;
+  latestProcessingFailReason: string;
+  latestProcessingFinishedAt: string | null;
+  processingRetryable: boolean;
   chunkStrategyType: KnowledgeChunkStrategyType;
   chunkConfigJson: string | null;
   chunkConfig?: KnowledgeChunkConfig | null;

@@ -15,6 +15,7 @@ import type {
 } from '@/types';
 import { isApiRequestError } from '@/api/request';
 import { confirmAction, showErrorMessage, showSuccessMessage } from '@/utils/ui-feedback';
+import { systemModuleAuthorizationRootCode, systemModuleNameText } from '@/utils/system-module-labels';
 
 type RoleFormMode = 'create' | 'edit';
 type PermissionTreeNodeType = 'module' | 'permission';
@@ -122,21 +123,7 @@ const dataScopeText = (scope: string) => {
   return labels[scope] ?? scope;
 };
 function moduleNameText(moduleCode: string): string {
-  const labels: Record<string, string> = {
-    system_auth: '登录鉴权',
-    system_user: '用户管理',
-    system_role: '角色管理',
-    system_dept: '部门管理',
-    system_menu: '菜单管理',
-    system_permission: '权限管理',
-    system_dict: '数据字典',
-    ai_model: '模型配置',
-    file: '文件管理',
-    knowledge: '知识库',
-    chat: '智能问答',
-    task: '任务中心',
-  };
-  return labels[moduleCode] ?? moduleCode;
+  return systemModuleNameText(moduleCode);
 }
 
 function flattenMenus(nodes: SystemMenuManagementNode[]): SystemMenuManagementNode[] {
@@ -214,10 +201,11 @@ function buildPermissionMenuNode(
     .map((child) => buildPermissionMenuNode(child, groupMap, usedModules))
     .filter((node): node is PermissionTreeNode => node !== null);
   const permissionNodes = buildPermissionLeafNodes(groupMap.get(moduleCode) ?? []);
+  const childModuleNodes = buildChildPermissionGroupNodes(moduleCode, groupMap, usedModules);
   if (permissionNodes.length > 0) {
     usedModules.add(moduleCode);
   }
-  const children = [...childNodes, ...permissionNodes];
+  const children = [...childNodes, ...childModuleNodes, ...permissionNodes];
   if (children.length === 0) {
     return null;
   }
@@ -228,6 +216,23 @@ function buildPermissionMenuNode(
     moduleCode,
     children,
   };
+}
+
+function buildChildPermissionGroupNodes(
+  parentModuleCode: string,
+  groupMap: Map<string, SystemPermission[]>,
+  usedModules: Set<string>,
+): PermissionTreeNode[] {
+  // 知识库只有一个菜单入口，子模块权限必须收敛到该菜单下，避免授权树根节点碎片化。
+  return Array.from(groupMap.entries())
+    .filter(([moduleCode]) => moduleCode !== parentModuleCode && systemModuleAuthorizationRootCode(moduleCode) === parentModuleCode)
+    .sort(([leftCode, leftItems], [rightCode, rightItems]) =>
+      permissionGroupSortOrder(leftItems) - permissionGroupSortOrder(rightItems)
+      || moduleNameText(leftCode).localeCompare(moduleNameText(rightCode), 'zh-CN'))
+    .map(([moduleCode, items]) => {
+      usedModules.add(moduleCode);
+      return buildPermissionGroupNode(moduleCode, moduleNameText(moduleCode), items);
+    });
 }
 
 function buildPermissionGroupNode(
@@ -255,6 +260,10 @@ function buildPermissionLeafNodes(items: SystemPermission[]): PermissionTreeNode
       permission,
       disabled: permission.permissionStatus !== 'enabled',
     }));
+}
+
+function permissionGroupSortOrder(items: SystemPermission[]): number {
+  return items.reduce((minimum, permission) => Math.min(minimum, permission.sortOrder), Number.MAX_SAFE_INTEGER);
 }
 
 function resolveErrorMessage(error: unknown, fallback: string): string {

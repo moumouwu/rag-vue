@@ -721,7 +721,7 @@ onMounted(loadTasks);
           type="warning"
           show-icon
           :closable="false"
-          title="影响范围为当前知识库内满足过滤条件的已发布文档，处理中和外部链接文档不会进入候选。"
+          title="影响范围为当前知识库内满足过滤条件的已发布文档，处理中不会进入候选；外部链接会重新抓取正文。"
         />
         <el-form-item label="知识库 ID" required>
           <el-input v-model="batchReprocessForm.knowledgeBaseId" clearable placeholder="必填" />

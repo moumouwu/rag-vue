@@ -140,6 +140,11 @@ function operationTypeText(operationType: string): string {
     import: '导入',
     export: '导出',
     config: '配置',
+    test: '测试',
+    reprocess: '重新处理',
+    retry: '重试',
+    batch_rerun: '批量重跑',
+    batch_reprocess: '批量重处理',
   };
   return labels[operationType] ?? operationType;
 }
@@ -476,6 +481,10 @@ onMounted(() => {
             <el-option label="菜单管理" value="system_menu" />
             <el-option label="权限管理" value="system_permission" />
             <el-option label="数据字典" value="system_dict" />
+            <el-option label="AI模型配置" value="ai_model" />
+            <el-option label="知识库管理" value="knowledge_base" />
+            <el-option label="文档管理" value="knowledge_document" />
+            <el-option label="任务中心" value="knowledge_task" />
           </el-select>
           <el-select v-model="operationQuery.operationType" clearable placeholder="操作类型">
             <el-option label="新增" value="create" />
@@ -483,6 +492,12 @@ onMounted(() => {
             <el-option label="删除" value="delete" />
             <el-option label="启停" value="status" />
             <el-option label="授权" value="authorize" />
+            <el-option label="配置" value="config" />
+            <el-option label="测试" value="test" />
+            <el-option label="重新处理" value="reprocess" />
+            <el-option label="重试" value="retry" />
+            <el-option label="批量重跑" value="batch_rerun" />
+            <el-option label="批量重处理" value="batch_reprocess" />
           </el-select>
           <el-select v-model="operationQuery.result" clearable placeholder="结果">
             <el-option label="成功" value="success" />

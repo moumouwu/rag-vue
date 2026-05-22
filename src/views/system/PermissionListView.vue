@@ -12,9 +12,10 @@ import type {
   SystemPermissionUpdatePayload,
 } from '@/types';
 import { confirmAction, showErrorMessage, showSuccessMessage } from '@/utils/ui-feedback';
+import { KNOWN_SYSTEM_MODULE_CODES, systemModuleNameText, systemModulePathText } from '@/utils/system-module-labels';
 
 type PermissionFormMode = 'create' | 'edit';
-type ModuleOptionSource = 'menu' | 'history';
+type ModuleOptionSource = 'menu' | 'preset' | 'history';
 
 interface ModuleOption {
   key: string;
@@ -26,10 +27,6 @@ interface ModuleOption {
 }
 
 const EMPTY_MODULE_KEY = '__empty_module__';
-// 少量权限没有对应菜单入口，只作为历史或基础能力兼容展示。
-const MENULESS_MODULE_LABELS: Record<string, string> = {
-  system_auth: '登录鉴权',
-};
 const PERMISSION_TYPE_DESCRIPTIONS = [
   { type: '接口', status: '已生效', description: '控制后端 API 访问，命中方法和路径后按角色接口权限放行。' },
   { type: '操作', status: '预留', description: '用于按钮、导入导出等业务动作授权，目前仅维护清单，不参与后端接口鉴权。' },
@@ -70,20 +67,11 @@ const moduleOptions = computed(() => {
   buildMenuModuleOptions(menuTree.value).forEach((module) => {
     moduleMap.set(module.key, module);
   });
+  KNOWN_SYSTEM_MODULE_CODES.forEach((moduleCode) => {
+    putModuleOptionIfAbsent(moduleMap, moduleCode, 'preset');
+  });
   permissions.value.forEach((permission) => {
-    const moduleCode = permission.moduleCode?.trim() || '';
-    const key = moduleKey(moduleCode);
-    if (!moduleMap.has(key)) {
-      const moduleName = MENULESS_MODULE_LABELS[moduleCode] ?? (moduleCode || '未分组');
-      moduleMap.set(key, {
-        key,
-        moduleCode,
-        moduleName,
-        modulePath: moduleName,
-        level: 0,
-        source: 'history',
-      });
-    }
+    putModuleOptionIfAbsent(moduleMap, permission.moduleCode, 'history');
   });
   return Array.from(moduleMap.values());
 });
@@ -117,8 +105,7 @@ function moduleNameText(moduleCode: string): string {
     return '未分组';
   }
   return moduleOptions.value.find((module) => module.key === moduleKey(moduleCode))?.modulePath
-    ?? MENULESS_MODULE_LABELS[moduleCode]
-    ?? moduleCode;
+    ?? systemModulePathText(moduleCode);
 }
 
 function moduleKey(moduleCode: string): string {
@@ -140,6 +127,27 @@ function statusText(status: string): string {
 
 function safeText(value: string | null | undefined): string {
   return value?.trim() ?? '';
+}
+
+function putModuleOptionIfAbsent(
+  moduleMap: Map<string, ModuleOption>,
+  moduleCode: string | null | undefined,
+  source: ModuleOptionSource,
+): void {
+  // 模块下拉既要兼容菜单树，也要覆盖没有独立菜单的接口权限分组。
+  const normalizedModuleCode = safeText(moduleCode);
+  const key = moduleKey(normalizedModuleCode);
+  if (moduleMap.has(key)) {
+    return;
+  }
+  moduleMap.set(key, {
+    key,
+    moduleCode: normalizedModuleCode,
+    moduleName: systemModuleNameText(normalizedModuleCode),
+    modulePath: systemModulePathText(normalizedModuleCode),
+    level: 0,
+    source,
+  });
 }
 
 function buildMenuModuleOptions(

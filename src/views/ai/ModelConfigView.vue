@@ -126,12 +126,34 @@ function safeText(value: string | null | undefined): string {
   return value?.trim() ?? '';
 }
 
+function isAuthOptionalProvider(providerCode: string | null | undefined): boolean {
+  const normalizedProvider = safeText(providerCode).toLowerCase();
+  return normalizedProvider === 'ollama' || normalizedProvider === 'local';
+}
+
+function canParticipateInFallback(model: AiModelConfig): boolean {
+  return model.modelStatus === 'enabled'
+    && !!safeText(model.endpointUrl)
+    && (model.apiKeyConfigured || isAuthOptionalProvider(model.providerCode));
+}
+
 function fallbackEligibleText(model: AiModelConfig): string {
-  return model.modelStatus === 'enabled' && model.apiKeyConfigured && !!safeText(model.endpointUrl) ? '可参与' : '不参与';
+  return canParticipateInFallback(model) ? '可参与' : '不参与';
 }
 
 function fallbackEligibleTagType(model: AiModelConfig): 'success' | 'info' {
   return fallbackEligibleText(model) === '可参与' ? 'success' : 'info';
+}
+
+function apiKeyDisplayText(model: AiModelConfig): string {
+  if (model.apiKeyConfigured) {
+    return safeText(model.apiKeyMasked) || '已配置';
+  }
+  return isAuthOptionalProvider(model.providerCode) ? '本地无需' : '未配置';
+}
+
+function apiKeyTagType(model: AiModelConfig): 'success' | 'info' {
+  return model.apiKeyConfigured || isAuthOptionalProvider(model.providerCode) ? 'success' : 'info';
 }
 
 function testModeText(mode: AiModelTestMode): string {
@@ -571,9 +593,7 @@ onMounted(loadModels);
         </el-table-column>
         <el-table-column label="密钥" width="130">
           <template #default="{ row }">
-            <el-tag :type="row.apiKeyConfigured ? 'success' : 'info'">
-              {{ row.apiKeyConfigured ? safeText(row.apiKeyMasked) || '已配置' : '未配置' }}
-            </el-tag>
+            <el-tag :type="apiKeyTagType(row)">{{ apiKeyDisplayText(row) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="88">
@@ -623,7 +643,7 @@ onMounted(loadModels);
               v-if="formMode === 'create'"
               v-model="modelForm.modelCode"
               maxlength="64"
-              placeholder="例如 qwen-plus-main"
+              placeholder="例如 deepseek-r1:8b"
             />
             <el-input v-else v-model="modelForm.modelCode" disabled />
           </el-form-item>
@@ -664,7 +684,7 @@ onMounted(loadModels);
             type="password"
             show-password
             maxlength="1000"
-            :placeholder="formMode === 'create' ? '可选，保存后不回显明文' : '留空表示保留原密钥'"
+            :placeholder="formMode === 'create' ? '本地模型可留空，云模型请填写' : '留空表示保留原密钥，本地模型可不配置'"
           />
         </el-form-item>
         <el-checkbox v-if="formMode === 'edit'" v-model="modelForm.clearApiKey" :disabled="!!modelForm.apiKey.trim()">

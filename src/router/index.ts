@@ -1,6 +1,9 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 import { useAuthSession } from '@/auth/auth-session';
 import AdminLayout from '@/views/AdminLayout.vue';
+import ChatConfigView from '@/views/chat/ChatConfigView.vue';
+import ChatFeedbackMetricsView from '@/views/chat/ChatFeedbackMetricsView.vue';
+import PromptTemplateListView from '@/views/chat/PromptTemplateListView.vue';
 import ModelConfigView from '@/views/ai/ModelConfigView.vue';
 import ChatWorkbenchView from '@/views/ChatWorkbenchView.vue';
 import FileManagerView from '@/views/file/FileManagerView.vue';
@@ -129,6 +132,24 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '聊天联调', menuCode: 'chat.workbench' },
       },
       {
+        path: 'chat/config',
+        name: 'ChatConfig',
+        component: ChatConfigView,
+        meta: { title: '聊天配置', menuCode: 'chat.config' },
+      },
+      {
+        path: 'chat/prompt-templates',
+        name: 'ChatPromptTemplate',
+        component: PromptTemplateListView,
+        meta: { title: '提示词模板', menuCode: 'chat.prompt-template' },
+      },
+      {
+        path: 'chat/feedback-metrics',
+        name: 'ChatFeedbackMetrics',
+        component: ChatFeedbackMetricsView,
+        meta: { title: '反馈与指标', menuCode: 'chat.feedback-metrics' },
+      },
+      {
         path: 'tasks',
         name: 'TaskCenter',
         component: TaskCenterWorkbenchView,
@@ -145,6 +166,7 @@ export const router = createRouter({
   routes,
 });
 
+// 登录后按当前账号菜单权限寻找默认落点，没有任何菜单时进入无权限页。
 function resolveDefaultAuthorizedPath(menus: Parameters<typeof findFirstAuthorizedMenuPath>[0]): string {
   return findFirstAuthorizedMenuPath(menus) ?? '/no-permission';
 }

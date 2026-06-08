@@ -16,6 +16,8 @@ const pageTitle = computed(() => String(route.meta.title ?? '工作台'));
 const rootMenus = computed(() => state.menus as readonly AuthorizedMenuNode[]);
 const hasVisibleMenus = computed(() => Boolean(findFirstAuthorizedMenuPath(rootMenus.value)));
 const visitedTabs = ref<Array<{ path: string; title: string }>>([]);
+// 聊天页需要固定视口工作区，避免消息列表增长时把底部输入区挤出屏幕。
+const isChatWorkbenchRoute = computed(() => route.name === 'ChatWorkbench');
 
 function resolveDefaultPath(): string {
   return findFirstAuthorizedMenuPath(rootMenus.value) ?? '/no-permission';
@@ -102,7 +104,7 @@ watch(
 </script>
 
 <template>
-  <div class="admin-shell">
+  <div class="admin-shell" :class="{ 'admin-shell--chat': isChatWorkbenchRoute }">
     <aside class="admin-sidebar">
       <div class="admin-brand">
         <span class="admin-brand__mark">知</span>
@@ -118,7 +120,7 @@ watch(
       </nav>
     </aside>
 
-    <div class="admin-main">
+    <div class="admin-main" :class="{ 'admin-main--chat': isChatWorkbenchRoute }">
       <header class="admin-topbar">
         <div>
           <p class="admin-topbar__eyebrow">当前页面</p>
@@ -149,7 +151,7 @@ watch(
         </div>
       </div>
 
-      <main class="admin-content">
+      <main class="admin-content" :class="{ 'admin-content--chat': isChatWorkbenchRoute }">
         <RouterView v-slot="{ Component, route: viewRoute }">
           <KeepAlive>
             <component

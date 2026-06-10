@@ -131,6 +131,7 @@ export interface SystemPermission {
 export interface SystemPermissionQuery extends PageRequest {
   keyword?: string;
   moduleCode?: string;
+  moduleCodes?: string[];
   permissionType?: 'api' | 'operation' | 'data_scope' | '';
   permissionStatus?: 'enabled' | 'disabled' | '';
 }

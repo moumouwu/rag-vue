@@ -137,6 +137,7 @@ export const systemApi = {
       pageSize: query.pageSize,
       keyword: query.keyword,
       moduleCode: query.moduleCode,
+      moduleCodes: query.moduleCodes,
       permissionType: query.permissionType,
       permissionStatus: query.permissionStatus,
     }));

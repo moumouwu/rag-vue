@@ -223,9 +223,12 @@ function buildChildPermissionGroupNodes(
   groupMap: Map<string, SystemPermission[]>,
   usedModules: Set<string>,
 ): PermissionTreeNode[] {
-  // 知识库只有一个菜单入口，子模块权限必须收敛到该菜单下，避免授权树根节点碎片化。
+  // 业务根菜单下的子模块权限统一收敛展示，避免授权树根节点碎片化。
   return Array.from(groupMap.entries())
-    .filter(([moduleCode]) => moduleCode !== parentModuleCode && systemModuleAuthorizationRootCode(moduleCode) === parentModuleCode)
+    .filter(([moduleCode]) =>
+      !usedModules.has(moduleCode) &&
+      moduleCode !== parentModuleCode &&
+      systemModuleAuthorizationRootCode(moduleCode) === parentModuleCode)
     .sort(([leftCode, leftItems], [rightCode, rightItems]) =>
       permissionGroupSortOrder(leftItems) - permissionGroupSortOrder(rightItems)
       || moduleNameText(leftCode).localeCompare(moduleNameText(rightCode), 'zh-CN'))

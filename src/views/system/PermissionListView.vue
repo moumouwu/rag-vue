@@ -5,17 +5,21 @@ import { systemApi } from '@/api/modules/system';
 import { isApiRequestError } from '@/api/request';
 import type {
   EntityId,
-  SystemMenuManagementNode,
   SystemPermission,
   SystemPermissionCreatePayload,
   SystemPermissionQuery,
   SystemPermissionUpdatePayload,
 } from '@/types';
 import { confirmAction, showErrorMessage, showSuccessMessage } from '@/utils/ui-feedback';
-import { KNOWN_SYSTEM_MODULE_CODES, systemModuleNameText, systemModulePathText } from '@/utils/system-module-labels';
+import {
+  KNOWN_SYSTEM_MODULE_CODES,
+  systemModuleAuthorizationChildCodes,
+  systemModuleNameText,
+  systemModulePathText,
+} from '@/utils/system-module-labels';
 
 type PermissionFormMode = 'create' | 'edit';
-type ModuleOptionSource = 'menu' | 'preset' | 'history';
+type ModuleOptionSource = 'preset' | 'history';
 
 interface ModuleOption {
   key: string;
@@ -34,7 +38,6 @@ const PERMISSION_TYPE_DESCRIPTIONS = [
 ];
 
 const permissions = ref<SystemPermission[]>([]);
-const menuTree = ref<SystemMenuManagementNode[]>([]);
 const loading = ref(false);
 const saving = ref(false);
 const dialogVisible = ref(false);
@@ -63,19 +66,16 @@ const permissionForm = reactive<SystemPermissionCreatePayload>({
 
 const moduleOptions = computed(() => {
   const moduleMap = new Map<string, ModuleOption>();
-  // 所属模块以下拉方式维护，优先使用菜单树路径，避免手写模块编码漂移。
-  buildMenuModuleOptions(menuTree.value).forEach((module) => {
-    moduleMap.set(module.key, module);
-  });
-  KNOWN_SYSTEM_MODULE_CODES.forEach((moduleCode) => {
-    putModuleOptionIfAbsent(moduleMap, moduleCode, 'preset');
-  });
+  // 模块候选来自统一中文映射和历史权限记录，避免菜单编码被误当成接口权限模块保存。
+  putKnownModuleOptions(moduleMap);
   permissions.value.forEach((permission) => {
     putModuleOptionIfAbsent(moduleMap, permission.moduleCode, 'history');
   });
   return Array.from(moduleMap.values());
 });
-const formModuleOptions = computed(() => moduleOptions.value.filter((module) => module.key !== EMPTY_MODULE_KEY));
+const formModuleOptions = computed(() => moduleOptions.value.filter(
+  (module) => module.key !== EMPTY_MODULE_KEY && !isAggregateModuleOption(module.moduleCode),
+));
 
 const currentPageEnabledCount = computed(
   () => permissions.value.filter((permission) => permission.permissionStatus === 'enabled').length,
@@ -112,6 +112,22 @@ function moduleKey(moduleCode: string): string {
   return moduleCode?.trim() || EMPTY_MODULE_KEY;
 }
 
+function isAggregateModuleOption(moduleCode: string): boolean {
+  return systemModuleAuthorizationChildCodes(moduleCode).length > 0;
+}
+
+function resolveSelectedModuleCodes(moduleCode: string): string[] {
+  const normalizedModuleCode = safeText(moduleCode);
+  if (!normalizedModuleCode || normalizedModuleCode === EMPTY_MODULE_KEY) {
+    return [];
+  }
+  const childCodes = systemModuleAuthorizationChildCodes(normalizedModuleCode);
+  if (childCodes.length === 0) {
+    return [];
+  }
+  return Array.from(new Set([normalizedModuleCode, ...childCodes]));
+}
+
 function permissionTypeText(permissionType: string): string {
   const labels: Record<string, string> = {
     api: '接口',
@@ -133,8 +149,9 @@ function putModuleOptionIfAbsent(
   moduleMap: Map<string, ModuleOption>,
   moduleCode: string | null | undefined,
   source: ModuleOptionSource,
+  level = 0,
 ): void {
-  // 模块下拉既要兼容菜单树，也要覆盖没有独立菜单的接口权限分组。
+  // 模块下拉既要覆盖预置模块，也要兼容历史自定义模块。
   const normalizedModuleCode = safeText(moduleCode);
   const key = moduleKey(normalizedModuleCode);
   if (moduleMap.has(key)) {
@@ -145,49 +162,41 @@ function putModuleOptionIfAbsent(
     moduleCode: normalizedModuleCode,
     moduleName: systemModuleNameText(normalizedModuleCode),
     modulePath: systemModulePathText(normalizedModuleCode),
-    level: 0,
+    level,
     source,
   });
 }
 
-function buildMenuModuleOptions(
-  nodes: SystemMenuManagementNode[],
-  parentNames: string[] = [],
-): ModuleOption[] {
-  // 下拉项保留完整菜单路径，用于区分一、二、三级同名菜单来源。
-  return nodes.flatMap((node) => {
-    const moduleCode = menuCodeToModuleCode(node.menuCode);
-    const moduleNames = [...parentNames, node.menuName].filter((name) => name.trim());
-    const children = buildMenuModuleOptions(node.children ?? [], moduleNames);
-    if (!moduleCode) {
-      return children;
+function putKnownModuleOptions(moduleMap: Map<string, ModuleOption>): void {
+  /*
+   * 预置模块按角色接口权限树的业务层级输出：
+   * 根模块可用于聚合查询，子模块才是保存时可落库的具体模块。
+   */
+  const handledModuleCodes = new Set<string>();
+  KNOWN_SYSTEM_MODULE_CODES.forEach((moduleCode) => {
+    if (handledModuleCodes.has(moduleCode)) {
+      return;
     }
-    return [
-      {
-        key: moduleKey(moduleCode),
-        moduleCode,
-        moduleName: node.menuName,
-        modulePath: moduleNames.join(' / '),
-        level: Math.max(moduleNames.length - 1, 0),
-        source: 'menu' as ModuleOptionSource,
-      },
-      ...children,
-    ];
+    putModuleOptionIfAbsent(moduleMap, moduleCode, 'preset', 0);
+    handledModuleCodes.add(moduleCode);
+    systemModuleAuthorizationChildCodes(moduleCode).forEach((childModuleCode) => {
+      putModuleOptionIfAbsent(moduleMap, childModuleCode, 'preset', 1);
+      handledModuleCodes.add(childModuleCode);
+    });
   });
-}
-
-function menuCodeToModuleCode(menuCode: string): string {
-  return safeText(menuCode).split('.').join('_');
 }
 
 async function loadPageData(): Promise<void> {
   loading.value = true;
   try {
+    const selectedModuleCode = selectedModuleKey.value === EMPTY_MODULE_KEY ? '' : selectedModuleKey.value;
+    const selectedModuleCodes = resolveSelectedModuleCodes(selectedModuleCode);
     const pageData = await systemApi.pagePermissions({
       pageNo: permissionPageNo.value,
       pageSize: permissionPageSize.value,
       keyword: keyword.value.trim(),
-      moduleCode: selectedModuleKey.value === EMPTY_MODULE_KEY ? '' : selectedModuleKey.value,
+      moduleCode: selectedModuleCodes.length > 0 ? '' : selectedModuleCode,
+      moduleCodes: selectedModuleCodes.length > 0 ? selectedModuleCodes : undefined,
       permissionType: permissionTypeFilter.value,
       permissionStatus: permissionStatusFilter.value,
     });
@@ -201,16 +210,6 @@ async function loadPageData(): Promise<void> {
     permissionPageSize.value = pageData.pageSize;
     permissionTotal.value = pageData.total;
     permissions.value = pageData.list;
-    try {
-      menuTree.value = await systemApi.listMenuTree();
-    } catch (error) {
-      /*
-       * 所属模块优先来自菜单树；如果当前角色没有菜单树权限，
-       * 仍允许用已有权限模块兼容展示，避免页面完全不可用。
-       */
-      menuTree.value = [];
-      showErrorMessage(resolveErrorMessage(error, '菜单模块加载失败，已使用权限历史模块展示'));
-    }
   } catch (error) {
     showErrorMessage(resolveErrorMessage(error, '权限列表加载失败'));
   } finally {
@@ -395,9 +394,15 @@ onMounted(loadPageData);
           :label="module.modulePath"
           :value="module.key"
         >
-          <span class="module-option" :style="{ paddingLeft: `${module.level * 14}px` }">
+          <span
+            class="module-option"
+            :class="{ 'module-option--child': module.level > 0 }"
+            :style="{ paddingLeft: `${module.level * 14}px` }"
+          >
             <span class="module-option__name">{{ module.moduleName }}</span>
-            <span class="module-option__path">{{ module.modulePath }}</span>
+            <span v-if="module.modulePath !== module.moduleName" class="module-option__path">
+              {{ module.modulePath }}
+            </span>
             <el-tag v-if="module.source === 'history'" size="small" type="info">历史</el-tag>
           </span>
         </el-option>
@@ -496,9 +501,15 @@ onMounted(loadPageData);
                 :label="module.modulePath"
                 :value="module.key"
               >
-                <span class="module-option" :style="{ paddingLeft: `${module.level * 14}px` }">
+                <span
+                  class="module-option"
+                  :class="{ 'module-option--child': module.level > 0 }"
+                  :style="{ paddingLeft: `${module.level * 14}px` }"
+                >
                   <span class="module-option__name">{{ module.moduleName }}</span>
-                  <span class="module-option__path">{{ module.modulePath }}</span>
+                  <span v-if="module.modulePath !== module.moduleName" class="module-option__path">
+                    {{ module.modulePath }}
+                  </span>
                   <el-tag v-if="module.source === 'history'" size="small" type="info">历史</el-tag>
                 </span>
               </el-option>
@@ -622,6 +633,18 @@ onMounted(loadPageData);
   flex: 0 0 auto;
   color: var(--el-text-color-primary);
   font-weight: 600;
+}
+
+.module-option--child .module-option__name {
+  font-weight: 500;
+}
+
+.module-option--child::before {
+  width: 10px;
+  height: 1px;
+  flex: 0 0 auto;
+  background: var(--el-border-color);
+  content: "";
 }
 
 .module-option__path {
